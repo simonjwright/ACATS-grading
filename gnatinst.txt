@@ -1,0 +1,267 @@
+Instructions for using the GNAT ACATS Grading Tools.
+
+These instructions cover using the GNAT-specific tools with the ACATS 4.1 Grading Tools.
+
+These tools grade the ACATS when built with GNAT. The tools are good enough for
+my primary purpose (grading newly constructed tests), so I'm making these
+available to other ACATS users in hopes that they will be useful.
+
+Careful! Your results running these tools may vary from those of a formal
+Conformity Assessment. During a formal Conformity Assessment, an implementer
+would have an opportunity to argue why a particular result is passing, to ask
+for special handling (compiler options and the like) for particular tests, and
+even dispute the correctness of tests. The grading tools provide an answer
+without any of this nuance; the tools presented here a one-size-fits-all
+approach to running the tests. As such, the results of a formal conformity
+assessment could be quite different than those provided by using the grading
+tools alone.
+
+The tools comprise:
+ 
+* the test summary tool (Summary) and grading tool (Grade) from ACATS 
+  4.1 - see 
+  http://www.ada-auth.org/acats-files/4.1/docs/UG-6.HTM for the complete 
+  documentation on these tools;
+* a time stamp and other information display tool (Tstamp);
+* a tool to create Windows batch files or Linux scripts to build ACATS 
+  tests and save the results (GNATScrp); and
+* a tool to create an event trace from the build listing for ACATS 
+  tests (GNATEvnt) -- this makes the input to the ACATS grading tool.
+* Sample Windows batch files (MkACATS, MkNew, Grd-All) for running the ACATS
+  on Windows.
+* A sample manual grading file - Gnat_Man.Txt - this file is complete for
+  GNATPro 18.1 on Windows testing ACATS 4.1 with ACATS Modification List (AML)
+  4.1G. It probably will need some modification for other versions of GNAT or
+  ACATS Modification Lists. (AML 4.1G corrects about 40 tests to make them
+  grade properly with the tools.)
+
+I've tested the tools on GNAT on Windows (specifically GNATPro 18.1
+against ACATS 4.1 with AML 4.1G). The tools should also work on Linux with
+appropriate modifications. Please contact me with any corrections or
+improvements.
+
+Note that the generated scripts can process most but not all ACATS tests.
+There's a list of reasons that the generated script might not work in the
+source of GNATScrp (along with a discussion of the compilation model and other
+choices made). The tests that can't be processed are outlined in the manual
+grading list.
+
+The manual grading list is intended to be just that: a list of tests that have
+to be hand-graded. The ACATS grading tool grades those as tests that require
+"Special Handling", and assumes that they pass (but only gives them half credit
+in the overall "progress score"). Each of these tests needs to be checked
+somehow for correct operation to have confidence on your test results.
+(One possible way is to capture the compilation results and save those for
+comparison against a known-good compilation run.)
+
+The tools are intended to be licensed on the same terms as the ACATS; I
+couldn't use the ACATS boilerplate as these tools aren't appropriate for the
+ACATS proper (they only work with a specific implementation) and thus won't
+ever be actually part of it.
+
+Below find a mini-guide in using these tools.
+ 
+All comments/improvements are welcome. Versions for other host systems and/or
+implementations are especially welcome.
+
+                   Randy Brukardt, ACAA Technical Agent.
+                   agent@ada-auth.org
+
+Using the GNAT ACATS Grading Tools
+ 
+The tools consist of 9 ".a" files containing the source code of 
+interrelated 5 tools (some of the source is shared by these tools):
+    (1) The test summary tool (Summary) - part of the ACATS;
+    (2) The test grading tool (Grade) - part of the ACATS;
+    (3) The time stampers tool (Tstamp);
+    (4) The script generator tool (GNATScrp) - GNAT specific;
+    (5) The event trace tool (GNATEvnt) - GNAT-specific.
+
+
+For an overview of the ACATS grading tools, see 
+http://www.ada-auth.org/acats-files/4.1/docs/UG-61.HTM
+(clause 6.1 of the ACATS User's Guide [AUG]). The following guide is 
+based on the workflow found in clause 6.1.1 of AUG.
+
+====
+
+   1. Install and configure the ACATS (if you haven't previously done that).
+      Don't forget to apply the most recent ACATS Modification list 
+      (http://www.ada-auth.org/acats.html).
+      Details can be found starting at clause 5.1 of AUG 
+      (http://www.ada-auth.org/acats-files/4.1/docs/UG-51.HTM). My sample 
+      batch files assume the standard layout with about fifty directories 
+      for each chapter and test kind. [Note: For this purpose, I put newly 
+      added tests into a "new" subdirectory; I just overwrite modified tests
+      with the new versions. But you can do what you want, the tools shouldn't
+      care so long as you don't have duplicate copies of the tests in your
+      runs.]
+
+    1A. Compile all of the support files and foundations in a 
+      convenient directory. Put that convenient directory on the 
+      "Ada_Objects_Path" for GNAT. The scripts assume these are available 
+      and previously compiled. I suggest making a script to do this, as 
+      there's a lot of these and they need to be refreshed every time a new 
+      compiler and/or ACATS comes out.
+
+      Alternatively, put the source code somewhere where GNAT can find it and
+      let GNAT compile the files as it needs them. This approach leaves a mess
+      of .o and .ali files in your test directory - but it's easy. (I seem
+      to have done that unintentionally in my most recent tests.)
+
+    2. Configure the tools. The GNATScrp tool has an internal flag that 
+       selects Linux scripts or Windows batch files.
+       You'll need to  change that flag (it's clearly marked) in the source 
+       if you try this on Linux (note: I didn't test this option, so there 
+       probably are bugs). The GNATEvnt tool has to make some assumptions 
+       about the messages that GNAT puts out; in particular the GNAT and 
+       GNATBIND sign-on messages are used with their version number. You'll 
+       need to change those if you have a different version of the GNAT 
+       compiler installed. (Those also are clearly marked.)
+       If you fail to do this latter step, you'll get event traces without
+       any compilations or binds.
+ 
+    3. Compile the 5 tools. Any Ada 2005 compiler should work. 
+       The six files GRADE.A, GRD_DATA.A, SPECIAL.A, SUMMARY.A, TRACE.A, and 
+       TST_SUM.A need to be extracted from the ACATS Support directory.
+       With GNAT, I'd just GNATChop all 9 ".a" files in a temporary directory 
+       and then GNATMake all 5 mains (names as above).
+       [If some GNAT expert wants to make project files to make doing
+       these compilations more easily, please send them to me and I'll update
+       the instructions.]
+
+    4. Create a temporary directory for your testing in a convenient 
+       place, and put the 5 executables from step 3 there. Also put the 
+       GNAT-Man.Txt file there, and the two batch files. If you're on 
+       Windows, you should modify the Mkacats.Bat file to change the location 
+       of the ACATS from "D:\acaa\acats\acats" (which is where you'll find it 
+       on my computer) to wherever you installed it.
+ 
+    5a. For Windows, the MkACATS.Bat file will execute all of the steps 
+        needed for processing and grading a single ACATS test directory. (I'll 
+        outline those below.) The directory name is given as the only 
+        parameter to the batch file name.
+        For instance, to process the chapter 5 B-Tests, use:
+            mkacats B5
+        The results will be put into various files with the directory name 
+        embedded (so that the various directories results are all unique). The 
+        key one is G-G<dir>.Txt: this contains the grading result for your 
+        test run. For the above command, that means that G-GB6.txt will 
+        contain the results. (In my run, I had 3 tests that need manual 
+        grading and 92 that pass.) The other files start with "41" (for ACATS 
+        4.1).
+
+        Warning: Don't run this in your ACATS directories! It cleans up after 
+        itself and will delete all of the tests!!
+ 
+    5b. If you're running on Linux, one option is to make a script like 
+        the mkacats batch file. It's a fairly simple batch file (there is
+        nothing conditional in it). I'll mention three points about the batch 
+        file: (1) "for" does what one would expect, iterate through the files 
+        that match the wildcard, calling the program with each file in turn; 
+        (2) "%1" is the parameter to the batch file call (I think this is $1 
+        on Linux, but its been a while since I built one of those); (3) "call" 
+        executes another batch file like a subprogram (without "call", the 
+        batch terminates when the other batch file does).
+
+    5c. Alternatively, you can run the steps manually (here, I do so 
+        the B5 directory on my computer, change as desired):
+        A: Generate the test summary for the directory, deleting any existing one
+           first (summaries and event traces always append, so old results just
+           make a mess). I use a pair of for loops for this:
+             del 41-B5-Sum.csv
+             for %i in (d:\acaa\acats\acats\B5\*.A??) do Summary %i 41-B5-Sum.csv
+             for %i in (d:\acaa\acats\acats\B5\*.D??) do Summary %i 41-B5-Sum.csv
+           This picks up all of the files with .a, .am, .au, .ada, .adt, 
+           and .dep extensions, which cover all of the Ada test extensions used 
+           in the ACATS. The above is the Windows command line version, you 
+           double the % when it is used in a batch file. I don't recall how
+           to do this on Linux.
+           Note that while my batch file does this for each run, it only has to
+           be done when a new ACATS version or AML is installed. Doing that won't
+           save much runtime, though, and forgetting to run it after an update
+           can cause problems, so it is recommended to just redo it each run.
+        B: Generate the script or batch file:
+             GnatScrp 41-B5-Sum.csv 41-B5.Bat 41-B5-Results.Txt d:\acaa\acats\acats\B5\
+           The arguments are the test summary file, the output 
+           script/batch file, the listing file that the script will generate, and 
+           the directory in which the original ACATS files are found.
+        C: Run the script or batch file:
+             41-B5
+        D: Create an event trace, again deleting any existing one first:
+             del 41-B5-Event.csv
+             GNATEvnt 41-B5-Results.Txt 41-B5-Event.csv
+           The arguments are the build listing created by the script, 
+           and the output event trace.
+        E: Grade the results:
+             Grade 41-B5-Event.csv 41-B5-Sum.csv GNAT-Man.Txt "ACATS 4.1 B5 Tests (for GNAT)" -Use_Time_Stamps -Normal -Check_All_Compiles -Use_Positions >G-GB5.Txt
+           The arguments are the event trace file, the test summary 
+           file, the manual grading list, and the title. See 
+           http://www.ada-auth.org/acats-files/4.1/docs/UG-614.HTM
+           (clause 6.1.4 of the AUG) for details.
+ 
+    6. To run the entire ACATS in its default setup, use "Grd-All.Bat". 
+       This will build all of the tests of the entire ACATS, producing a 
+       single result in the file Grd-All.Txt. It uses Mkacats for each 
+       individual directory, then cats all of the results together. (Again, 
+       you'll have to make your own script for Linux..) [Note: 
+       This will take a couple of hours to run.]
+ 
+    7. If you are trying to use these tools to evaluate a compile like 
+       GNAT, you would want to look at each failure individually, determine 
+       if it would pass if manually graded, and if so, add it to the manual 
+       grading list (GNAT-Man.Txt). Then rerun the grading to get updated
+       results. This is time-consuming, which is why it is easiest to start
+       with the list from my test run. If you're using modified versions
+       of these tools with some other compiler, though, you'll have to start
+       with a blank file.
+
+       Future versions of the ACATS will continue to change existing tests
+       that fail to grade with the tools to be more lenient with the locations
+       of errors. This will reduce the size of the manual grading files.
+
+       It would also be possible to manually create compilation scripts for
+       some tests (the ones with foreign language code, for instance), to
+       eliminate the need to include them on the manually graded tests list.
+
+     8. It's unlikely that any existing implementation would pass the 
+        up-to-date ACATS, which is why the grading tool includes a "progress" 
+        score if enough tests are graded and the test run is classified 
+        "failed". One can use that score to see if changes are helping or 
+        hindering (it's hard to do that with the detailed results). I
+        typically rename each set of results with the date so that I can
+        compare against recent sets.
+ 
+     9. Details of the individual GNAT tools can be found in the source 
+        code as comments.
+
+Troubleshooting:
+   A. You can look at the contents of the .csv files in a text editor or in
+      a spreadsheet. They're more likely to be readable in a spreadsheet (all
+      the extra quotes and commas are omitted in that case).
+
+   B. For the test summaries, the usual problem is that some tests were
+      omitted when the summaries were created. The test source names are in
+      the second column. If a test doesn't appear in the summary given to the
+      grading tool, it won't be graded at all. The summary tool has been run
+      on the entire ACATS as it currently exists without problems, so problems
+      are most likely with the tool's command line.
+
+   C. For the event trace, the usual problem is that some result is not picked
+      up. That could be from a tailoring problem (see step 2), or from a change
+      made to GNAT. There should be CSTART and CEND tags for each compilation,
+      BSTART and BEND for each binding, and EXSTART and EXEND tags for each run.
+
+      Compare the event trace (41-<dir>-Event.csv) to the captured compilation
+      results (41-<dir>-Results.txt); they should be the same. Also look at
+      any messages generated by GNATEvnt.
+
+   D. The grading tool compares a test summary with a event trace. One can get
+      a detailed look at the grading process with the -Verbose option. Or maybe
+      just a lot of noise. :-) I usually go all the way back to the compilation
+      results and see if I think they pass or fail before worrying about the
+      possibility of grading bugs. Only if the test appears to pass do I look
+      at the details of grading the test.
+
+
+

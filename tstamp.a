@@ -1,0 +1,82 @@
+--
+-- Time Stamp generator
+--
+-- This program generates a unique line with a timestamp and other information
+-- to include in a compilation listing. This program is used by GNATScrp
+-- to create listings with all of the needed information to create an event
+-- trace.
+--
+-- Use:
+--    TStamp <Unit-Name> <Unit-Kind> [<Source-File> [<Source_Start>]]
+-- <Unit-Name> is the name of the unit being compiled/bound.
+-- <Unit-Kind> is the expected unit kind (in the format of the summary file),
+-- or "BIND" or "FINISH". <Source-File> is the name of the original
+-- source file; it can be omitted if <Unit-Kind> is "BIND" or "FINISH".
+-- <Source-Start> is the first line in the source file; it can be omitted
+-- if we are starting at the start of the source file (or if there is not
+-- source file parameter).
+--
+-- Intended use: "BIND" marks the start of binding; "FINISH" marks the
+-- completion of a test; everything else marks the start of compilation.
+--
+-- CHANGE HISTORY:
+--     24 Jan 2017   RLB  Created basic program.
+--     26 Jan 2017   RLB  Added Start_Line.
+
+with Ada.Calendar.Arithmetic,
+     Ada.Calendar.Formatting,
+     Ada.Command_Line,
+     Ada.Text_IO;
+procedure TStamp is
+   Kill_Tool : exception;
+
+begin
+   if Ada.Command_Line.Argument_Count < 2 then
+      Ada.Text_IO.Put_Line ("*ERROR* Insufficient command line arguments - " &
+         "unit name and unit kind");
+      Ada.Text_IO.Put_Line ("        are required - quitting");
+      raise Kill_Tool;
+   end if;
+   if Ada.Command_Line.Argument_Count > 4 then
+      Ada.Text_IO.Put_Line ("*ERROR* Too many command line arguments - " &
+         "quitting");
+      raise Kill_Tool;
+   end if;
+   if not (Ada.Command_Line.Argument(2) = "BIND" or else
+           Ada.Command_Line.Argument(2) = "FINISH") and then
+      Ada.Command_Line.Argument_Count not in 3 .. 4 then
+      Ada.Text_IO.Put_Line ("*ERROR* Source name required on command line - " &
+         "quitting");
+      Ada.Text_IO.Put_Line ("        are required - quitting");
+      raise Kill_Tool;
+   end if;
+
+   Ada.Text_IO.Put ("%%%% ");
+   Ada.Text_IO.Put (Ada.Calendar.Formatting.Image (
+      Date => Ada.Calendar.Clock,
+      Include_Time_Fraction => True));
+   if Ada.Command_Line.Argument(2) = "BIND" then
+       Ada.Text_IO.Put ("| BIND ");
+       Ada.Text_IO.Put_Line (Ada.Command_Line.Argument(1)); -- Unit-Name
+   elsif Ada.Command_Line.Argument(2) = "FINISH" then
+       Ada.Text_IO.Put ("| FINISH ");
+       Ada.Text_IO.Put_Line (Ada.Command_Line.Argument(1)); -- Unit-Name
+   elsif Ada.Command_Line.Argument_Count = 3 then
+       Ada.Text_IO.Put ("| ");
+       Ada.Text_IO.Put (Ada.Command_Line.Argument(2)); -- Unit-Kind
+       Ada.Text_IO.Put (": ");
+       Ada.Text_IO.Put (Ada.Command_Line.Argument(1)); -- Unit-Name
+       Ada.Text_IO.Put (" from ");
+       Ada.Text_IO.Put_Line (Ada.Command_Line.Argument(3)); -- Source-Name
+   else
+       Ada.Text_IO.Put ("| ");
+       Ada.Text_IO.Put (Ada.Command_Line.Argument(2)); -- Unit-Kind
+       Ada.Text_IO.Put (": ");
+       Ada.Text_IO.Put (Ada.Command_Line.Argument(1)); -- Unit-Name
+       Ada.Text_IO.Put (" from ");
+       Ada.Text_IO.Put (Ada.Command_Line.Argument(3)); -- Source-Name
+       Ada.Text_IO.Put ("[");
+       Ada.Text_IO.Put (Ada.Command_Line.Argument(4)); -- Source-Start
+       Ada.Text_IO.Put_Line ("]");
+   end if;
+end TStamp;
