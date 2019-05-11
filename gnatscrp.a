@@ -1,0 +1,847 @@
+--
+-- GNAT ACATS Test Execution Script Generation
+--
+-- This program uses the test summary information collected by the
+-- Summary program to create a GNAT compilation script for ACATS
+-- test programs.
+--
+-- Use:
+--    GNATScrp <Summary_of_Tests_File_Name> <Script_File_Name>
+--                                      <Result_File_Name> <Source_Path>
+-- <Summary_of_Tests_File_Name> is the test summary file to create a
+--    script from.
+-- <Script_File_Name> is the name of the script file to create. (For Windows,
+--    this should be a .BAT file.)
+-- <Result_File_Name> is the name of the file that the script file will
+--    save its compilation/binding/execution listings.
+-- <Source_Path> is the full path of the directory where the ACATS source
+--    files can be found.
+--
+-- The resulting script file can be used to run the ACATS test files,
+-- subject to the following assumptions:
+-- * All ACATS customizations have been performed. See clause 5.2 in the ACATS
+--   User's Guide (http://www.ada-auth.org/acats-files/4.1/docs/UG-52.HTM).
+-- * The script should be run in a scratch directory. The script attempts to
+--   clean up the mess left over after processing each test, but some tests
+--   leave junk of their own. Using a scratch directory will allow it to be
+--   junked afterwards.
+-- * All support files and foundations are previously compiled and saved in
+--   a subdirectory found on the Ada_Object_Path. The Ada_Object_Path needs
+--   to be set before running the generated script.
+--
+-- The generated script probably will need manual changes in the following
+-- cases:
+-- * A test requires different options than those normally used.
+-- * A test includes foreign language code (.C, .FTN, .CBL).
+-- * A test with multiple partitions (mainly Annex E tests).
+-- * A test replaces a unit that has a body with one that does not (or
+--   vice-versa).
+--
+-- CHANGE HISTORY:
+--     25 Jan 2017   RLB  Created basic program.
+--     26 Jan 2017   RLB  Added Start_Line to compilation TStamp lines.
+--     27 Jan 2017   RLB  Fixed location of GNATChop (a few tests have
+--                        multiple copies of the same unit).
+--      1 Feb 2017   RLB  Captured StdErr for tests (so that unhandled
+--                        exceptions end up in the listings. Added an
+--                        option for processing UTF-8 files.
+--      2 Feb 2017   RLB  Changed model of compilation.
+
+with Ada.Calendar.Arithmetic,
+     Ada.Calendar.Formatting,
+     Ada.Command_Line,
+     Ada.Containers.Generic_Array_Sort,
+     Ada.Directories,
+     Ada.Exceptions,
+     Ada.Strings.Fixed,
+     Ada.Text_IO;
+with Trace, Test_Summary, Grading_Data;
+procedure GNATScrp is
+
+   -- Model of test processing:
+   -- The basic idea is to generate a script that processes the compilation
+   -- units that make up a test in the order required by the ACATS,
+   -- properly creates an executable (for other than B-Tests), and does so
+   -- in a manner that makes it easy to extract all of the information needed
+   -- to create an event trace.
+   --
+   -- This has three challenges:
+   --  * GNAT doesn't display any time stamps, so we have to use some other
+   --    means to include those into the test listing.
+   --  * GNAT needs to GNATChop the source files before compiling them,
+   --    and the compilations use different source file names.
+   --  * Not all GNAT compilations generate code. Which units don't generate
+   --    code depends in part on the contents of the unit (in particular,
+   --    whether a body is required), so the information required to determine
+   --    whether code is generated is not present in the test summaries.
+   --    Moreover, compiling files in the ACATS required order may not
+   --    generate code at all for some units.
+   --
+   -- We solve the first problem by including calls to TStamp at appropriate
+   -- points. This tiny Ada program puts a timestamp and other information
+   -- provided in its command line to Standard Output. This allows proper
+   -- time stamps to be available at every important point. Moreover, it allows
+   -- getting most of the Start information for the event trace from these
+   -- calls rather than having to extract it from the compiler run. (The
+   -- event generator does ensure that the compiler actually ran for a test
+   -- before generating a Compile_Start event.)
+   --
+   -- The other two problems are solved by recalling that the Compile and
+   -- Bind steps are those that enforce Legality Rules and Post-Compilation
+   -- Rules, respectively. Other test processing steps that don't produce
+   -- errors except in unusual cases don't need to be included in the
+   -- event trace at all. If one of those steps fails, then the following
+   -- step will fail because of missing/corrupt input. For instance, if
+   -- a GNATChop fails, a following compile will fail with missing source
+   -- code.
+   --
+   -- Therefore, we solve the second problem by doing GNATChops separately
+   -- from compilation (and the event trace generator makes no attempt to
+   -- determine what happened during GNATChop; of course the results are
+   -- included in the listing for the human reader). GNATChop includes an
+   -- option that makes error messages relative to the original file; we use
+   -- that in our generated scripts.
+   --
+   -- And we solve the third problem by considering code generation to be
+   -- something that is done at bind time. To accomplish that, we make all
+   -- compiles with the "no code generation" flag set. "Binding" is
+   -- accomplished with GNATMake, which will do all of the needed code
+   -- generation. If all of the compiles succeeded, the GNATMake should fail
+   -- only in unusual cases (and such failures are treated as Bind errors).
+   --
+   -- By using GNATMake, we get closer to the usual use of the GNAT toolset.
+   -- Doing individual compilations and binds is unusual. However, we can't
+   -- just used GNATMake alone, as we have to control the order of compilations
+   -- such that units are compiled in an order allowed by the test design.
+   -- In particular, when there are multiple source files, the units have to be
+   -- compiled in the order of the source files (else the grading tool will
+   -- report a process error). The rules used here are a compromise between
+   -- normal use and processing tests are required.
+
+
+   type Target_Kind_Type is (Windows, Linux);
+   Target_Kind : constant Target_Kind_Type := Windows;
+--Change if necessary-------------------------^^^^^^^
+
+   Debug_Tool : constant Boolean := True;
+--Change if necessary---------------^^^^^
+
+   Ada_Version_Option : constant String := "-gnat12"; -- Ada 2012
+--Change if necessary-----------------------^^^^^^^
+
+   Ada_Semantic_Compiler_Options : constant String := "-gnatE -gnato " &
+                                                      "-fstack-check";
+      -- The above "options" are needed to get canoncial semantics from
+      -- GNAT and thus are required when running the ACATS with GNAT.
+      -- -gnatE - Full dynamic elaboration checks. The default GNAT model
+      --          eliminates these checks in favor of making some unusual
+      --          (correct) Ada programs illegal. The ACATS needs the actual
+      --          Ada rules, even if the GNAT model is usually better.
+      -- -gnato - Strict overflow checks (this is the default for recent
+      --          versions of GNAT, so perhaps this could be dropped here).
+      -- -fstack-check - Make stack overflow checks.
+
+   Processing_Compiler_Options : constant String := "-gnatf -gnatq -gnatU" &
+      " -gnatb -gnatv";
+      -- -gnatf - Full errors (do not attempt to suppress "redundant" errors).
+      --          Running without this switch can cause errors to be
+      --          suppressed that are needed to pass the ACATS.
+      -- -gnatq - Don't quit even if there are early errors. Some B-Tests
+      --          need this to detect all errors.
+      -- -gnatU - Include the string "error:" before errors (GNATEvnt uses
+      --          this).
+      -- -gnatb - Put brief errors to Stderr and verbose errors to Stdout.
+      -- -gnatv - Produce verbose compiler output. (This includes start and
+      --          end of compilation messages that we need).
+
+   UTF_8_Option : constant String := "-gnatW8";
+      -- Option to force UTF-8 input. (The GNAT documentation seems to suggest
+      -- that having a BOM - as all ACATS tests do - should set this
+      -- automatically. But that doesn't seem to happen, so we're adding it
+      -- manually.
+
+   Initial_Compiler_Options : constant String := "-gnatc";
+      -- -gnatc - No code generation.
+      -- We don't generate code until the binder phase (compilations here
+      -- are primarily used to ensure that all Legality Rules are enforced).
+      -- See the discussion of "Model of test processing" above.
+
+   Extra_Compiler_Options : constant String := "-O0 -gnatws";
+--Change if necessary---------------------------^^^^^^^^^^^
+      -- The above sets the compiler options to use, excluding options that
+      -- are required and the Ada version.
+      -- -O0 - turn off optimization.
+      -- -gnatws - suppress all warnings. GNATEvnt doesn't need warning
+      -- messages, but they should be harmless.
+
+      -- Possible additional options:
+      -- -gnatd7 - Suppress source file time stamp (useful with -gnatl).
+      -- -gnatl - Listing.
+
+   Kill_Tool : exception;
+
+   Script_File : Ada.Text_IO.File_Type;
+
+   Test_Counter : Natural := 0;
+
+   use type Grading_Data.Summary_Item_Count; -- For operators.
+
+   function GNAT_Unit_Name (Name : in Test_Summary.Comp_Unit_Name)
+      return Test_Summary.Comp_Unit_Name is
+      Result : Test_Summary.Comp_Unit_Name := Name;
+   begin
+      if Result(2) = '.' then -- Special case, see GNAT UG.
+         if Result(1) = 'a' or else
+            Result(1) = 'g' or else
+            Result(1) = 'i' or else
+            Result(1) = 's' or else
+            Result(1) = 'A' or else
+            Result(1) = 'G' or else
+            Result(1) = 'I' or else
+            Result(1) = 'S' then
+            Result(2) := '~';
+         else
+            Result(2) := '-';
+         end if;
+      end if;
+      for I in 3 .. Result'Last loop
+         if Result(I) = '.' then
+            Result(I) := '-';
+         end if;
+      end loop;
+      return Result;
+   end GNAT_Unit_Name;
+
+
+   function Source_Representation_Option
+      (Item : Grading_Data.Summary_Item_Index) return String is
+      -- Return the necessary source representation option, including a
+      -- separator if any option is generated.
+   begin
+      if Ada.Strings.Fixed.Index
+         (Grading_Data.Summary_of_Tests(Item).Source_Name, ".AU") /= 0 then
+         -- A UTF-8 source file (upper case).
+         return UTF_8_Option & " ";
+      elsif Ada.Strings.Fixed.Index
+         (Grading_Data.Summary_of_Tests(Item).Source_Name, ".au") /= 0 then
+         -- A UTF-8 source file (lower case).
+         return UTF_8_Option & " ";
+      else
+         return "";
+      end if;
+   end Source_Representation_Option;
+
+
+   procedure Generate_Test_Compilation_Script (
+      First, Last : in Grading_Data.Summary_Item_Index;
+      Skip_Specs : in Boolean := False) is
+      -- Generate a test script to compile the units belonging to the summary
+      -- items found in the range First to Last. We can assume that these
+      -- items are all for a single test. We also set up the start of a test
+      -- here. (Note: We skip processing of optional units, and
+      -- specification if Skip_Specs is True.)
+      Result_Name : constant String := Ada.Command_Line.Argument(3);
+      Source_Path : constant String := Ada.Command_Line.Argument(4);
+      use type Test_Summary.Info_Kind_Type; -- For operators.
+      use type Test_Summary.Compilation_Unit_Kinds; -- For operators.
+
+      function Is_Spec (Kind : in Test_Summary.Compilation_Unit_Kinds)
+         -- Returns True if a unit of this kind is found in an .ads file
+         -- rather than an .adb file.
+         -- Note: This is not the same as whether the unit will generate
+         -- code; some .ads files generate code with GNAT.
+         return Boolean is
+      begin
+          case Kind is
+             when Test_Summary.Package_Specification =>
+                return True;
+             when Test_Summary.Function_Specification =>
+                return True;
+             when Test_Summary.Procedure_Specification =>
+                return True;
+             when Test_Summary.Generic_Package =>
+                return True;
+             when Test_Summary.Generic_Function =>
+                return True;
+             when Test_Summary.Generic_Procedure =>
+                return True;
+             when Test_Summary.Package_Body =>
+                return False;
+             when Test_Summary.Function_Body =>
+                return False;
+             when Test_Summary.Procedure_Body =>
+                return False;
+             when Test_Summary.Package_Instantiation =>
+                return True;
+             when Test_Summary.Function_Instantiation =>
+                return True;
+             when Test_Summary.Procedure_Instantiation =>
+                return True;
+             when Test_Summary.Package_Renaming =>
+                return True;
+             when Test_Summary.Function_Renaming =>
+                return True;
+             when Test_Summary.Procedure_Renaming =>
+                return True;
+             when Test_Summary.Generic_Package_Renaming =>
+                return True;
+             when Test_Summary.Generic_Function_Renaming =>
+                return True;
+             when Test_Summary.Generic_Procedure_Renaming =>
+                return True;
+             when Test_Summary.Package_Subunit =>
+                return False;
+             when Test_Summary.Procedure_Subunit =>
+                return False;
+             when Test_Summary.Function_Subunit =>
+                return False;
+             when Test_Summary.Task_Subunit =>
+                return False;
+             when Test_Summary.Protected_Subunit =>
+                return False;
+             when Test_Summary.Configuration_Pragma =>
+                return False; -- Not really a compilation in GNAT.
+          end case;
+      end Is_Spec;
+
+
+      function Unit_Kind_Code (Kind : in Test_Summary.Compilation_Unit_Kinds)
+          return String is
+      begin
+          case Kind is
+             when Test_Summary.Package_Specification =>
+                return "UPACKSPEC";
+             when Test_Summary.Function_Specification =>
+                return "UFUNCSPEC";
+             when Test_Summary.Procedure_Specification =>
+                return "UPROCSPEC";
+             when Test_Summary.Generic_Package =>
+                return "UGENPACK";
+             when Test_Summary.Generic_Function =>
+                return "UGENFUNC";
+             when Test_Summary.Generic_Procedure =>
+                return "UGENPROC";
+             when Test_Summary.Package_Body =>
+                return "UPACKBODY";
+             when Test_Summary.Function_Body =>
+                return "UFUNCBODY";
+             when Test_Summary.Procedure_Body =>
+                return "UPROCBODY";
+             when Test_Summary.Package_Instantiation =>
+                return "UPACKINST";
+             when Test_Summary.Function_Instantiation =>
+                return "UFUNCINST";
+             when Test_Summary.Procedure_Instantiation =>
+                return "UPROCINST";
+             when Test_Summary.Package_Renaming =>
+                return "UPACKREN";
+             when Test_Summary.Function_Renaming =>
+                return "UFUNCREN";
+             when Test_Summary.Procedure_Renaming =>
+                return "UPROCREN";
+             when Test_Summary.Generic_Package_Renaming =>
+                return "UGPACKREN";
+             when Test_Summary.Generic_Function_Renaming =>
+                return "UGFUNCREN";
+             when Test_Summary.Generic_Procedure_Renaming =>
+                return "UGPROCREN";
+             when Test_Summary.Package_Subunit =>
+                return "PACKSUB";
+             when Test_Summary.Procedure_Subunit =>
+                return "PROCSUB";
+             when Test_Summary.Function_Subunit =>
+                return "FUNCSUB";
+             when Test_Summary.Task_Subunit =>
+                return "TASKSUB";
+             when Test_Summary.Protected_Subunit =>
+                return "PROTSUB";
+             when Test_Summary.Configuration_Pragma =>
+                return "PRAGMA";
+          end case;
+      end Unit_Kind_Code;
+
+
+   begin
+      if Debug_Tool then
+         if First > Last then
+            raise Program_Error with "No summary items for test " &
+               Grading_Data.Summary_of_Tests(First).Source_Name(1..7);
+         end if;
+      end if;
+
+      Test_Counter := Test_Counter + 1;
+      if Target_Kind = Windows then
+         Ada.Text_IO.Put_Line (Script_File, "echo Test number" &
+            Natural'Image(Test_Counter) & " - " &
+            Grading_Data.Summary_of_Tests(First).Source_Name(1..7) &
+            " >> " & Result_Name);
+      -- elsif Target_Kind = Linux then
+      --    Not sure of a Linux counterpart, and this is not critical, so
+      --    we'll leave it out.
+      -- else Unknown target
+      end if;
+
+      -- Copy each source file, GNATChop it, and then compile the units:
+      -- Note: We assume that the summary records are sorted so that all of
+      -- the records for a single source file are contiguous -- we did that
+      -- explicitly earlier.
+      -- Note: We can't Gnatchop all of the source at once, as a few tests
+      -- have multiple copies of the same unit (to emulate a developer
+      -- editing the unit); so we have to gnatchop a file then compile
+      -- all of the units in it before repeating on the next file.
+      for I in First .. Last loop
+         if I = First or else
+            Grading_Data.Summary_of_Tests(I).Source_Name /=
+            Grading_Data.Summary_of_Tests(I-1).Source_Name then
+            -- This is the first record for this source file. Generate the
+            -- needed code. First, copy the file:
+            if Target_Kind = Windows then
+               Ada.Text_IO.Put_Line (Script_File, "copy " &
+                   Source_Path & Grading_Data.Summary_of_Tests(I).Source_Name &
+                   " .");
+            elsif Target_Kind = Linux then
+               Ada.Text_IO.Put_Line (Script_File, "cp " &
+                   Source_Path & Grading_Data.Summary_of_Tests(I).Source_Name &
+                   " .");
+            -- else unknown target
+            end if;
+            Ada.Text_IO.Put_Line (Script_File, "gnatchop -w -c -r " &
+               Ada_Version_Option & " " & Source_Representation_Option (I) &
+               Grading_Data.Summary_of_Tests(I).Source_Name &
+               " >> " & Result_Name);
+                -- Some Gnatchop options are required:
+                -- -c "compilation mode" -- handle configuration pragmas
+                --     -- exactly as the RM specifies.
+                -- -r  -- Use Source_Reference pragmas so that error
+                --     -- messages correspond to the original ACATS test file.
+                --     -- (Since the summaries are created of the original
+                --     -- files, this is critical to getting the correct
+                --     -- behavior.)
+                -- -w  -- Overwrite existing files (in case junk was left
+                --     -- behind by a previous run).
+                -- We also include an option to set the Ada version, so
+                -- generated scripts can be used to test any ACATS version.
+                -- And we include an option for the source representation,
+                -- if needed for a particular source file.
+
+         -- else already handled this source file.
+         end if;
+
+         if Grading_Data.Summary_of_Tests(I).Kind =
+            Test_Summary.Compilation_Unit and then
+            (not Grading_Data.Summary_of_Tests(I).Optional) and then
+            (Grading_Data.Summary_of_Tests(I).Unit_Kind /=
+                                   Test_Summary.Configuration_Pragma) and then
+            ((not Skip_Specs) or else
+             (not Is_Spec (Grading_Data.Summary_of_Tests(I).Unit_Kind))) then
+            -- Generate a compilation for any unit that is not
+            -- optional. (And isn't a pragma; GNAT doesn't compile those.)
+            -- These should be in a possible order.
+
+            if Grading_Data.Summary_of_Tests(I).Start_Line not in 0 .. 1 then
+               Ada.Text_IO.Put_Line (Script_File, "tstamp " &
+                  Ada.Strings.Fixed.Trim (
+                     Grading_Data.Summary_of_Tests(I).Unit_Name,
+                     Ada.Strings.Both) & " " &
+                  Unit_Kind_Code (Grading_Data.Summary_of_Tests(I).Unit_Kind) &
+                  " " &
+                  Ada.Strings.Fixed.Trim (
+                     Grading_Data.Summary_of_Tests(I).Source_Name,
+                     Ada.Strings.Both) &
+                  Trace.Line_Number_Type'Image (
+                     Grading_Data.Summary_of_Tests(I).Start_Line) &
+                  " >> " & Result_Name);
+            else -- Don't need start line, omit it.
+              Ada.Text_IO.Put_Line (Script_File, "tstamp " &
+                  Ada.Strings.Fixed.Trim (
+                     Grading_Data.Summary_of_Tests(I).Unit_Name,
+                     Ada.Strings.Both) & " " &
+                  Unit_Kind_Code (Grading_Data.Summary_of_Tests(I).Unit_Kind) &
+                  " " &
+                  Ada.Strings.Fixed.Trim (
+                     Grading_Data.Summary_of_Tests(I).Source_Name,
+                     Ada.Strings.Both) &
+                  " >> " & Result_Name);
+            end if;
+            if Is_Spec (Grading_Data.Summary_of_Tests(I).Unit_Kind) then
+               Ada.Text_IO.Put_Line (Script_File, "gcc " &
+                  Ada.Strings.Fixed.Trim (GNAT_Unit_Name (
+                        Grading_Data.Summary_of_Tests(I).Unit_Name),
+                     Ada.Strings.Both) & ".ads -c " &
+                     Ada_Version_Option & " " &
+                     Source_Representation_Option (I) &
+                     Ada_Semantic_Compiler_Options & " " &
+                     Processing_Compiler_Options & " " &
+                     Initial_Compiler_Options & " " &
+                     Extra_Compiler_Options &
+                     " >> " & Result_Name & " 2>&1");
+               -- See below for reasons why we use this format.
+            else
+               Ada.Text_IO.Put_Line (Script_File, "gcc " &
+                  Ada.Strings.Fixed.Trim (GNAT_Unit_Name (
+                        Grading_Data.Summary_of_Tests(I).Unit_Name),
+                     Ada.Strings.Both) & ".adb -c " &
+                     Ada_Version_Option & " " &
+                     Source_Representation_Option (I) &
+                     Ada_Semantic_Compiler_Options & " " &
+                     Processing_Compiler_Options & " " &
+                     Initial_Compiler_Options & " " &
+                     Extra_Compiler_Options &
+                     " >> " & Result_Name & " 2>&1");
+               -- We have to capture StdErr in order to retrieve brief format
+               -- messages.
+               -- Note: The redirect works on Windows and Linux Bash, it
+               -- might not work on other shells.
+            end if;
+            -- The -c "option" is required on all Ada compiles, so we don't
+            -- include it in the "compiler options".
+
+         -- else not interested in other kinds of summary items, or an optional
+         -- unit, or a specification and we're skipping specifications.
+         end if;
+      end loop;
+
+   end Generate_Test_Compilation_Script;
+
+
+   procedure Generate_Test_Cleanup_Script (
+      First, Last : in Grading_Data.Summary_Item_Index;
+      Includes_Binding : in Boolean) is
+      -- Generate a script to cleanup the test run for the summary
+      -- items found in the range First to Last. We can assume that these
+      -- items are all for a single test. We also set up the finish of a test
+      -- here. The test includes binding if Includes_Binding is True (if it
+      -- doesn't, there is no need to try to clean up binding artifacts).
+      Result_Name : constant String := Ada.Command_Line.Argument(3);
+      use type Test_Summary.Info_Kind_Type; -- For operators.
+   begin
+      -- Mark the Finish of the part of the listing that we need for event
+      -- trace purposes.
+      Ada.Text_IO.Put_Line (Script_File, "tstamp " &
+            Grading_Data.Summary_of_Tests(First).Source_Name(1..7) &
+            " FINISH" & " >> " & Result_Name);
+
+      -- We need to cleanup any source file copied, any source file unit
+      -- created by Gnatchop, .ali and .o files for any compilation unit
+      -- created by Gcc, and any executable file. Luckily, most of these
+      -- have a name prefixed by the test name.
+
+      -- First, we delete any file that matches the test name (with any
+      -- following characters), and any file that matches the elaboration
+      -- main program name):
+      if Target_Kind = Windows then
+         Ada.Text_IO.Put_Line (Script_File, "del " &
+            Grading_Data.Summary_of_Tests(First).Source_Name(1..7) &  "*.*");
+         if Includes_Binding then
+            Ada.Text_IO.Put_Line (Script_File, "del b~" &
+              Grading_Data.Summary_of_Tests(First).Source_Name(1..7) &  "*.*");
+         -- else no binding to clean up.
+         end if;
+         -- Delete the file containing any configuration pragmas, too.
+         Ada.Text_IO.Put_Line (Script_File, "del gnat.adc");
+      elsif Target_Kind = Linux then
+         Ada.Text_IO.Put_Line (Script_File, "rm " &
+            Grading_Data.Summary_of_Tests(First).Source_Name(1..7) &  "*");
+         if Includes_Binding then
+            Ada.Text_IO.Put_Line (Script_File, "rm b~" &
+               Grading_Data.Summary_of_Tests(First).Source_Name(1..7) &  "*");
+         -- else no binding to clean up.
+         end if;
+         -- Delete the file containing any configuration pragmas, too.
+         Ada.Text_IO.Put_Line (Script_File, "rm gnat.adc");
+      -- else Unknown target
+      end if;
+
+      -- Then check for any compilation units with some non-standard name,
+      -- but not units with 1 or 2 character names (those will delete far
+      -- too much).
+      for I in First .. Last loop
+         if Grading_Data.Summary_of_Tests(I).Kind =
+            Test_Summary.Compilation_Unit and then
+            Grading_Data.Summary_of_Tests(I).Source_Name(1..7) /=
+            Grading_Data.Summary_of_Tests(I).Unit_Name(1..7) and then
+            Grading_Data.Summary_of_Tests(I).Unit_Name(3) /= ' ' then
+            if Target_Kind = Windows then
+               Ada.Text_IO.Put_Line (Script_File, "del " &
+                  Ada.Strings.Fixed.Trim (GNAT_Unit_Name (
+                        Grading_Data.Summary_of_Tests(I).Unit_Name),
+                      Ada.Strings.Both) & "*.*");
+            elsif Target_Kind = Linux then
+               Ada.Text_IO.Put_Line (Script_File, "rm " &
+                  Ada.Strings.Fixed.Trim (GNAT_Unit_Name (
+                        Grading_Data.Summary_of_Tests(I).Unit_Name),
+                      Ada.Strings.Both) & "*");
+            -- else Unknown target
+            end if;
+         -- else
+         end if;
+      end loop;
+   end Generate_Test_Cleanup_Script;
+
+
+   procedure Generate_B_Test_Script (
+      First, Last : in Grading_Data.Summary_Item_Index) is
+      -- Generate a B-Test Script for the summary items found in
+      -- the range First to Last. We can assume that these items are all
+      -- for a single test.
+      -- For B-Tests, we compile all units, but do not bind or execute the
+      -- code.
+   begin
+      Generate_Test_Compilation_Script (First, Last);
+
+      Generate_Test_Cleanup_Script (First, Last, Includes_Binding => False);
+   end Generate_B_Test_Script;
+
+
+   procedure Generate_Other_Test_Script (
+      First, Last : in Grading_Data.Summary_Item_Index) is
+      -- Generate a non-B-Test ACATS Test Script for the summary items found
+      -- in the range First to Last. We can assume that these items are all
+      -- for a single test.
+      -- We compile all units, then bind and execute the test.
+      Result_Name : constant String := Ada.Command_Line.Argument(3);
+      use type Test_Summary.Info_Kind_Type; -- For operators.
+   begin
+      Generate_Test_Compilation_Script (First, Last);
+
+      -- Mark the start of the binding step for event
+      -- trace purposes.
+      Ada.Text_IO.Put_Line (Script_File, "tstamp " &
+            Grading_Data.Summary_of_Tests(First).Source_Name(1..7) &
+            " BIND" & " >> " & Result_Name);
+
+      -- Find the name of the main unit:
+      for I in First .. Last loop
+         if Grading_Data.Summary_of_Tests(I).Kind =
+            Test_Summary.Compilation_Unit and then
+            Grading_Data.Summary_of_Tests(I).Is_Main then
+
+            Ada.Text_IO.Put_Line (Script_File, "gnatmake "  &
+               Ada.Strings.Fixed.Trim (GNAT_Unit_Name (
+                      Grading_Data.Summary_of_Tests(I).Unit_Name),
+                   Ada.Strings.Both) &
+                   " -eS -cargs " &
+                   Ada_Version_Option & " " &
+                   Source_Representation_Option (I) &
+                   Ada_Semantic_Compiler_Options & " " &
+                   Processing_Compiler_Options & " " &
+                   Extra_Compiler_Options &
+                   " -bargs -T0 -v" &
+               " >> " & Result_Name & " 2>&1");
+               -- GNATMake option: -eS - send compile, bind, and link commands
+               --    Stdout.
+               -- GNATBind options (-bargs):
+               -- -v: Verbose messages.
+               -- -T0: Annex D tasking compatibility.
+               -- Note: Some failures only go to StdErr for GNATMake, so
+               -- to capture everything in the listing, we grab StdErr.
+
+
+--            Ada.Text_IO.Put_Line (Script_File, "gnatbind -T0 -v "  &
+--               Ada.Strings.Fixed.Trim (GNAT_Unit_Name (
+--                      Grading_Data.Summary_of_Tests(I).Unit_Name),
+--                   Ada.Strings.Both) &
+--               " >> " & Result_Name);
+--               -- -v:  Verbose mode: sends error messages to Stdout.
+--               -- -T0: Annex D tasking compatibility.
+--
+--            Ada.Text_IO.Put_Line (Script_File, "gnatlink " &
+--               Ada.Strings.Fixed.Trim (GNAT_Unit_Name (
+--                      Grading_Data.Summary_of_Tests(I).Unit_Name),
+--                   Ada.Strings.Both) &
+--               " >> " & Result_Name);
+
+            -- Execute the test:
+            Ada.Text_IO.Put_Line (Script_File,
+               Ada.Strings.Fixed.Trim (GNAT_Unit_Name (
+                      Grading_Data.Summary_of_Tests(I).Unit_Name),
+                   Ada.Strings.Both) &
+               " >> " & Result_Name & " 2>&1");
+               -- Note: Unhandled exceptions go to StdErr for GNAT, so
+               -- to capture elaboration problems in the listing, we
+               -- grab StdErr.
+            exit; -- Only one main (A few Annex E tests have multiple mains;
+                  -- they'll need manual handling).
+
+         end if;
+         if Debug_Tool then
+            if I = Last then
+               Ada.Text_IO.Put_Line ("** No main found for C-Test " &
+                  Grading_Data.Summary_of_Tests(First).Source_Name(1..7));
+            end if;
+         end if;
+      end loop;
+
+      Generate_Test_Cleanup_Script (First, Last, Includes_Binding => True);
+   end Generate_Other_Test_Script;
+
+
+begin
+   Ada.Text_IO.Put_Line ("GNAT ACATS Test Execution Script Generation - " &
+                         "version 1.0");
+
+   if Ada.Command_Line.Argument_Count < 4 then
+      Ada.Text_IO.Put_Line ("*ERROR* Insufficient command line arguments - " &
+         "test summary file, ");
+      Ada.Text_IO.Put_Line ("        script file, result file, and source " &
+         "path are required - ");
+      Ada.Text_IO.Put_Line ("        quitting");
+      raise Kill_Tool;
+   end if;
+
+   Ada.Text_IO.Put_Line ("  Create script from summary " &
+                            Ada.Command_Line.Argument(1));
+   Ada.Text_IO.Put_Line ("  to generate " & Ada.Command_Line.Argument(2));
+   Ada.Text_IO.Put_Line ("  capturing results into " &
+                            Ada.Command_Line.Argument(3));
+   Ada.Text_IO.Put_Line ("  with ACATS source found in " &
+                            Ada.Command_Line.Argument(4));
+
+   begin
+      Grading_Data.Read_Summary_of_Tests (Ada.Command_Line.Argument(1));
+   exception
+      when Exc1:Ada.Text_IO.Name_Error =>
+         Ada.Text_IO.Put_Line ("*ERROR* Test Summary file not found - " &
+            "message: " & Ada.Exceptions.Exception_Message (Exc1));
+         raise Kill_Tool;
+      when Exc2:Grading_Data.Format_Error =>
+         Ada.Text_IO.Put_Line ("*ERROR* Test Summary file malformed - " &
+            Ada.Exceptions.Exception_Message (Exc2));
+         raise Kill_Tool;
+      when Exc3:others =>
+         if Debug_Tool then
+            Ada.Text_IO.Put_Line ("*ERROR* Exception processing Test " &
+               "Summary file - " &
+               Ada.Exceptions.Exception_Information (Exc3));
+         else
+            Ada.Text_IO.Put_Line ("*ERROR* Exception processing Test " &
+               "Summary file - " & Ada.Exceptions.Exception_Name (Exc3) & "; "
+               & Ada.Exceptions.Exception_Message (Exc3));
+         end if;
+         raise Kill_Tool;
+   end;
+
+   begin
+      Ada.Text_IO.Create (Script_File,
+                          Mode => Ada.Text_IO.Out_File,
+                          Name => Ada.Command_Line.Argument(2));
+   exception
+      when Exc1:Ada.Text_IO.Name_Error =>
+         Ada.Text_IO.Put_Line ("*ERROR* Bad filename for Script file - " &
+            "message: " & Ada.Exceptions.Exception_Message (Exc1));
+         raise Kill_Tool;
+      when Exc3:others =>
+         if Debug_Tool then
+            Ada.Text_IO.Put_Line ("*ERROR* Exception creating Script " &
+               "file - " &
+               Ada.Exceptions.Exception_Information (Exc3));
+         else
+            Ada.Text_IO.Put_Line ("*ERROR* Exception creating Script file " &
+               "- " & Ada.Exceptions.Exception_Name (Exc3) & "; "
+               & Ada.Exceptions.Exception_Message (Exc3));
+         end if;
+         raise Kill_Tool;
+   end;
+
+   -- Make sure that all of the test summaries are grouped by test and in
+   -- line number order within a source file.
+   -- This is just a precaution; they should generally be in the right order.
+
+   declare
+      function "<" (Left, Right : Test_Summary.Info_Record) return Boolean is
+         use type Trace.Line_Number_Type, Trace.Line_Position_Type;
+         use type Test_Summary.Info_Kind_Type;
+      begin
+         if Left.Source_Name < Right.Source_Name then
+            return True;
+         elsif Left.Source_Name > Right.Source_Name then
+            return False;
+         -- If we're here, the two records are for the same source file.
+         elsif Left.Start_Line < Right.Start_Line then
+            return True;
+         elsif Left.Start_Line > Right.Start_Line then
+            return False;
+         -- If we're here, the two records have the same line.
+         -- Put the compilation unit first, in case an error tag is in the
+         -- context clause (they could have the same position).
+         elsif Left.Kind = Test_Summary.Compilation_Unit and then
+               Right.Kind /= Test_Summary.Compilation_Unit then
+            return True;
+         elsif Left.Kind /= Test_Summary.Compilation_Unit and then
+               Right.Kind = Test_Summary.Compilation_Unit then
+            return False;
+         elsif Left.Start_Position >= Right.Start_Position then
+            return False;
+         else -- Left.Start_Position < Right.Start_Position then
+            return True;
+         end if;
+      end "<";
+
+      procedure Sort_Summary is new Ada.Containers.Generic_Array_Sort (
+         Index_Type   => Grading_Data.Summary_Item_Index,
+         Element_Type => Test_Summary.Info_Record,
+         Array_Type   => Grading_Data.Summary_Item_Array,
+         "<"          => "<");
+   begin
+      Sort_Summary (Grading_Data.Summary_of_Tests(
+         Grading_Data.Summary_of_Tests'First ..
+                                            Grading_Data.Last_Summary_Item));
+   end;
+
+   -- Start the script:
+
+   if Target_Kind = Windows then
+       Ada.Text_IO.Put_Line (Script_File, "Rem Run the ACATS tests found in " &
+           Ada.Command_Line.Argument(4) & ";");
+       Ada.Text_IO.Put_Line (Script_File, "Rem saving the results into " &
+           Ada.Command_Line.Argument(3));
+       Ada.Text_IO.Put_Line (Script_File, "Rem Assume that all support and " &
+           "foundation files are previously");
+       Ada.Text_IO.Put_Line (Script_File, "Rem    compiled in a directory " &
+           "available on Ada_Object_Path");
+
+       -- Start with an empty result listing file:
+       Ada.Text_IO.Put_Line (Script_File, "del " &
+                                               Ada.Command_Line.Argument(3));
+   else
+       -- Comment characters vary for different shells; for now, we'll leave
+       -- the comments out.
+       -- Start with an empty result listing file:
+       Ada.Text_IO.Put_Line (Script_File, "rm " &
+                                               Ada.Command_Line.Argument(3));
+   end if;
+
+
+   declare
+      Working_Item : Grading_Data.Summary_Item_Count :=
+         Grading_Data.Summary_of_Tests'First;
+      First_Item : Grading_Data.Summary_Item_Count;
+   begin
+      while Working_Item <= Grading_Data.Last_Summary_Item loop
+         First_Item := Working_Item;
+         Working_Item := Working_Item + 1;
+         while Working_Item <= Grading_Data.Last_Summary_Item loop
+            exit when Grading_Data.Summary_of_Tests(First_Item).
+               Source_Name(1..7) /=
+               Grading_Data.Summary_of_Tests(Working_Item).Source_Name(1..7);
+            Working_Item := Working_Item + 1;
+         end loop;
+         -- When we get here, all of the items First_Item .. Working_Item - 1
+         -- belong to the same test.
+
+         if Grading_Data.Summary_of_Tests(First_Item).Source_Name(1) = 'B' then
+            Generate_B_Test_Script (First_Item, Working_Item - 1);
+         else
+            Generate_Other_Test_Script (First_Item, Working_Item - 1);
+         end if;
+
+      end loop;
+   end;
+
+   -- And we're done.
+
+   Ada.Text_IO.Close (Script_File);
+
+exception
+   when Kill_Tool => null; -- A fatal error happened.
+end GNATScrp;

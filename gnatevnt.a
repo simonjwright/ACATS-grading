@@ -1,0 +1,804 @@
+--
+-- GNAT ACATS Event Trace Creation.
+--
+-- This program processes a ACATS run listing (from a run of a script
+-- created by GNATScpt) to create an event trace for GNAT processing of
+-- ACATS tests.
+--
+-- Use:
+--    GNATEvnt <Listing_File_Name> <Event_Trace_File_Name>
+-- <Listing_File_Name> is the name of the file into which the script file saved
+--    its compilation/binding/execution listings.
+-- <Event_Trace_File_Name> is the name of the event trace file to create.
+--
+-- Requirements:
+-- We assume that gcc is called with the "-gnatU -gnatb -gnatv" options and
+-- that StdErr is captured for the compiler. We use the "brief" error format
+-- to extract events, and the compiler header and footer from the verbose
+-- format to delimit compilation start and ending.
+--
+-- We use compiler and binder sign-on and completion messages to find the
+-- start and end of operations in order to detect missing compilation and
+-- binding; if we just used TStamp lines, the compilation could be totally
+-- missing for C-Tests and execution alone (of files of unknown provenance)
+-- could provide the needed results.
+--
+-- Limitations: This tool only identifies events that are in an expected
+-- format. If a compiler or binder malfunctions and produces unusual output,
+-- this tool probably will skip the messages. Similarly, a malfunctioning
+-- test execution may generate messages that are not recognizable.
+-- Additionally, malfunctions that produce no messages (which might happen on
+-- Windows if the OS uses a popup box to report a problem) will not be noticed.
+-- These limitations aren't usually a problem for grading ACATS tests (as
+-- in most cases, the required completion messages will be missing and that
+-- by itself will cause a test to be graded as failed), but can make
+-- determining the reason for a failed grade more difficult.
+--
+-- There is one case where these limitations could cause a test to be graded
+-- as passed when it is in fact failed: if the test has "aberrant" termination
+-- after reporting it is passed. 5.6.1 in the ACATS User's Guide makes it
+-- clear that for an executable test to pass, it has to terminate silently
+-- and gracefully after reporting the final test status. Late failure
+-- messages will be picked up by the grading tool and this tool will treat
+-- all messages that follow the final test result message as failure messages,
+-- but test hangs, crashes, unhandled exceptions, and the like may not be
+-- detected. IT IS THE USER'S RESPONSIBILITY TO ENSURE THAT TEST EXECUTION
+-- DOES NOT HAVE ABERRANT TERMINATION. A formal ACATS test run can be graded as
+-- Failed even if the grading tool reports that the test run passed if the
+-- testing laboratory observes aberrant termination.
+--
+-- CHANGE HISTORY:
+--     26 Jan 2017   RLB  Created basic program.
+--     27 Jan 2017   RLB  Added missing BERR and BEND events.
+--     25 Feb 2017   RLB  Changed GNAT identification strings (installed a new
+--                        GNAT).
+--     18 Dec 2017   RLB  Changed GNAT identification strings (installed a new
+--                        GNAT).
+--     22 Dec 2017   RLB  Fixed declaration of Lineno so that we're certain to
+--                        be able to process long listings.
+--     15 Jun 2018   RLB  Corrected Put_Event_Trace to deal properly with
+--                        excessively long lines, proposed by Simon Wright.
+--
+with Ada.Calendar.Arithmetic,
+     Ada.Calendar.Formatting,
+     Ada.Command_Line,
+     Ada.Exceptions,
+     Ada.Strings.Fixed,
+     Ada.Strings.Unbounded,
+     Ada.Text_IO;
+with Trace;
+procedure GNATEvnt is
+
+   Kill_Tool : exception;
+
+   Debug_Tool : constant Boolean := True;
+--Change if necessary---------------^^^^^
+
+   GNAT_Identification : constant String := "GNAT Pro 18.";
+--Change if necessary------------------------^^^^^^^^^^^^^^
+      -- This identifies the start of a compliation; it has to match the
+      -- value written to the listings.
+
+   GNATBIND_Identification : constant String := "GNATBIND Pro 18.";
+--Change if necessary----------------------------^^^^^^^^^^^^^^^^
+      -- This identifies the start of binding; it has to match the
+      -- value written to the listings.
+
+   Report_ACATS_Version_String : constant String := "ACATS 4.1";
+--Change if necessary--------------------------------^^^^^^^^^
+      -- This has to match the value found in Report.
+
+
+   Listing_File : Ada.Text_IO.File_Type;
+
+   Event_File : Ada.Text_IO.File_Type;
+
+   procedure Put_Event_Trace (Event    : in String;
+                              Timestamp: in String;
+                              Msg      : in String;
+                              Item_Name: in String := "";
+                              Line_Num : in Trace.Line_Number_Type := 0;
+                              Line_Pos : in Trace.Line_Position_Type := 0) is
+      -- Put an event trace. Mostly the same as the routine in the
+      -- ACATS Report.A, with the differences that we only open the file
+      -- once, and that we copy the text timestamp.
+      -- (Item_Name is the source or unit name, as needed.)
+      Max_Event_Message_Len : constant := 150;
+         -- Limit event messages to this length.
+   begin
+      Ada.Text_IO.Put (Event_File, Event & ",""" &
+                       Timestamp & """,""" &
+                       Item_Name & """,");
+      if Line_Num /= 0 or else Line_Pos /= 0 then
+         Ada.Text_IO.Put (Event_File, Trace.Line_Number_Type'Image(Line_Num) &
+                                      ',');
+         if Line_Pos = 0 then
+            Ada.Text_IO.Put (Event_File, "0,""");
+         else
+            Ada.Text_IO.Put (Event_File,
+                             Trace.Line_Position_Type'Image(Line_Pos) & ",""");
+         end if;
+      else
+         Ada.Text_IO.Put (Event_File, ",,""");
+      end if;
+
+      declare
+         Msg_Copy : String := Msg;
+      begin
+         for I in Msg_Copy'range loop
+            if Msg_Copy(I) = '"' then -- Can't have any double
+                                      -- quotes in this string.
+               Msg_Copy(I) := ''';
+            end if;
+         end loop;
+         if Msg_Copy'Length <= Max_Event_Message_Len then
+            Ada.Text_IO.Put_Line (Event_File, Msg_Copy & """");
+         else
+            -- Find a space near the end:
+            for I in reverse Msg_Copy'First +
+               Max_Event_Message_Len-20 .. Msg_Copy'First +
+               Natural'Min(Max_Event_Message_Len+1,Msg_Copy'Length-1) loop
+               if Msg_Copy(I) = ' ' then
+                  Ada.Text_IO.Put_Line (Event_File,
+                           Msg_Copy (Msg_Copy'First .. I - 1) & """");
+                  return; -- Done.
+               -- else continue looking.
+               end if;
+            end loop;
+            -- No space obvious, so truncate it.
+            Ada.Text_IO.Put_Line (Event_File,
+               Msg_Copy (Msg_Copy'First .. Msg_Copy'First + Natural'Min(
+                            Max_Event_Message_Len, Msg_Copy'Length)-1) & """");
+         end if;
+      end;
+   end Put_Event_Trace;
+
+begin
+   Ada.Text_IO.Put_Line ("GNAT ACATS Event Trace Generation - version 1.0");
+
+   if Ada.Command_Line.Argument_Count < 2 then
+      Ada.Text_IO.Put_Line ("*ERROR* Insufficient command line arguments - " &
+         "listing file and ");
+      Ada.Text_IO.Put_Line ("        event trace file are required - " &
+         "quitting");
+      raise Kill_Tool;
+   end if;
+
+   Ada.Text_IO.Put_Line ("  Create event trace from listing file " &
+                            Ada.Command_Line.Argument(1));
+   Ada.Text_IO.Put_Line ("  to generate " & Ada.Command_Line.Argument(2));
+
+   begin
+      Ada.Text_IO.Open (Listing_File,
+                        Mode => Ada.Text_IO.In_File,
+                        Name => Ada.Command_Line.Argument(1));
+   exception
+      when Exc1:Ada.Text_IO.Name_Error =>
+         Ada.Text_IO.Put_Line ("*ERROR* Listing file not found - " &
+            "message: " & Ada.Exceptions.Exception_Message (Exc1));
+         raise Kill_Tool;
+      when Exc3:others =>
+         if Debug_Tool then
+            Ada.Text_IO.Put_Line ("*ERROR* Exception opening listing " &
+               "file - " &
+               Ada.Exceptions.Exception_Information (Exc3));
+         else
+            Ada.Text_IO.Put_Line ("*ERROR* Exception opening listing file " &
+               "- " & Ada.Exceptions.Exception_Name (Exc3) & "; " &
+               Ada.Exceptions.Exception_Message (Exc3));
+         end if;
+         raise Kill_Tool;
+   end;
+
+   begin
+      Ada.Text_IO.Open (Event_File,
+                        Mode => Ada.Text_IO.Append_File,
+                        Name => Ada.Command_Line.Argument(2));
+   exception
+      when Ada.Text_IO.Name_Error =>
+         -- The file doesn't exist, create it.
+         begin
+            Ada.Text_IO.Create (Event_File,
+                                Mode => Ada.Text_IO.Out_File,
+                                Name => Ada.Command_Line.Argument(2));
+                -- Write a header. This is not strictly necessary,
+                -- but we do it as it makes it a lot easier to use
+                -- the .CSV file in an spreadsheet.
+            Ada.Text_IO.Put_Line (Event_File,
+                                  "Event,Timestamp,Name," &
+                                  "Line,Position,Message");
+         exception
+            when Exc2:Ada.Text_IO.Name_Error =>
+               Ada.Text_IO.Put_Line ("*ERROR* Unable to create event trace " &
+                  "file - message: " &
+                  Ada.Exceptions.Exception_Message (Exc2));
+               raise Kill_Tool;
+            when Exc3:others =>
+               if Debug_Tool then
+                  Ada.Text_IO.Put_Line ("*ERROR* Exception opening listing " &
+                     "file - " &
+                     Ada.Exceptions.Exception_Information (Exc3));
+               else
+                  Ada.Text_IO.Put_Line ("*ERROR* Exception opening listing " &
+                     "file - " & Ada.Exceptions.Exception_Name (Exc3) & "; " &
+                      Ada.Exceptions.Exception_Message (Exc3));
+               end if;
+               raise Kill_Tool;
+         end;
+     when Exc1:others =>
+       if Debug_Tool then
+          Ada.Text_IO.Put_Line ("*ERROR* Exception opening event trace " &
+             "file - " &
+             Ada.Exceptions.Exception_Information (Exc1));
+       else
+          Ada.Text_IO.Put_Line ("*ERROR* Exception opening listing " &
+             "file - " & Ada.Exceptions.Exception_Name (Exc1) & "; " &
+             Ada.Exceptions.Exception_Message (Exc1));
+       end if;
+       raise Kill_Tool;
+   end;
+
+   declare
+      type Line_Number_Type is range 0 .. 1_000_000;
+      Lineno : Line_Number_Type := 0;
+      type Last_Kind_Type is (Start_Compile_Spec, Start_Compile_Body,
+         Start_Bind, Start_Execution, Execution_Complete, Finish);
+      Last_Timestamp : Ada.Strings.Unbounded.Unbounded_String;
+      Last_Source_Name : Ada.Strings.Unbounded.Unbounded_String;
+      Last_Unit_Name : Ada.Strings.Unbounded.Unbounded_String;
+      Last_Start_Line : Trace.Line_Number_Type := 1;
+      Last_Kind : Last_Kind_Type := Finish;
+         -- Last_Source_Name is only valid if Last_Unit_Name =
+         --    Start_Compile_xxx.
+         -- No other kinds of events other than a TStamp run should
+         -- be accepted when Last_Kind = Finish.
+      Wrote_Start_Bind : Boolean := False;
+      Wrote_End_Bind : Boolean := False;
+      Buffer : String(1..500);
+      BLast  : Natural;
+
+      function "+" (A : in Ada.Strings.Unbounded.Unbounded_String)
+         return String renames Ada.Strings.Unbounded.To_String;
+
+      procedure Error (Cause : in String) is
+      begin
+         Ada.Text_IO.Put_Line ("*ERROR* " & Cause & " on line" &
+            Line_Number_Type'Image(Lineno) & " in " & Buffer(1..BLast));
+      end Error;
+
+   begin
+      loop
+         Ada.Text_IO.Get_Line (Listing_File, Buffer, BLast);
+         Lineno := Lineno + 1;
+
+-- Display the line for initial work.
+-- Ada.Text_IO.Put_Line ("--" & Line_Number_Type'Image(Lineno) & ": " &
+--                                                 Buffer(1..BLast));
+
+         if BLast > 40 and then Buffer(1..5) = "%%%% " then
+            -- We have a TStamp line. Set the various "Last_xxx" objects
+            -- appropriately. These do not cause events directly, other
+            -- lines do that. See TStamp.A for the format of these lines.
+            declare
+               TEnd_Loc : Natural;
+               KEnd_Loc : Natural;
+               From_Loc : Natural;
+               LBrack_Loc : Natural;
+               RBrack_Loc : Natural;
+            begin
+               TEnd_Loc := Ada.Strings.Fixed.Index (Buffer(6..BLast), "| ");
+               if TEnd_Loc /= 0 then
+                  Last_Timestamp :=
+                     Ada.Strings.Unbounded.To_Unbounded_String (
+                        Buffer(6 .. TEnd_Loc-1));
+                  KEnd_Loc := Ada.Strings.Fixed.Index (
+                     Buffer(TEnd_Loc+2..BLast), ": ");
+                  if KEnd_Loc = 0 then
+                     if Buffer(TEnd_Loc+2..TEnd_Loc+5) = "BIND" then
+                        KEnd_Loc := TEnd_Loc+5;
+                        From_Loc := 0;
+                        Last_Kind := Start_Bind;
+                        Wrote_Start_Bind := False;
+                     elsif Buffer(TEnd_Loc+2..TEnd_Loc+7) = "FINISH" then
+                        KEnd_Loc := TEnd_Loc+7;
+                        From_Loc := 0;
+                        Last_Kind := Finish;
+                     else
+                        Error ("Unable to recognize TStamp kind");
+                        goto TStamp_Done;
+                     end if;
+                  else
+                     From_Loc := Ada.Strings.Fixed.Index (
+                        Buffer(KEnd_Loc+2..BLast), " from ");
+                     if From_Loc = 0 then
+                        Error ("Missing From in compilation TStamp");
+                     end if;
+                     if Buffer(TEnd_Loc+2..TEnd_Loc+10) = "UPACKSPEC" or else
+                        Buffer(TEnd_Loc+2..TEnd_Loc+10) = "UPROCSPEC" or else
+                        Buffer(TEnd_Loc+2..TEnd_Loc+10) = "UFUNCSPEC" or else
+                        Buffer(TEnd_Loc+2..TEnd_Loc+9) = "UGENPACK" or else
+                        Buffer(TEnd_Loc+2..TEnd_Loc+9) = "UGENPROC" or else
+                        Buffer(TEnd_Loc+2..TEnd_Loc+9) = "UGENFUNC" then
+                        Last_Kind := Start_Compile_Spec;
+                     else
+                        Last_Kind := Start_Compile_Body;
+                     end if;
+                  end if;
+                  if From_Loc = 0 then
+                     Last_Unit_Name :=
+                        Ada.Strings.Unbounded.To_Unbounded_String (
+                           Buffer(KEnd_Loc+2 .. BLast));
+                  else
+                     Last_Unit_Name :=
+                        Ada.Strings.Unbounded.To_Unbounded_String (
+                           Buffer(KEnd_Loc+2 .. From_Loc-1));
+                     LBrack_Loc := Ada.Strings.Fixed.Index (
+                        Buffer(From_Loc..BLast), "[");
+                     RBrack_Loc := Ada.Strings.Fixed.Index (
+                        Buffer(From_Loc..BLast), "]");
+                     if LBrack_Loc = 0 or else RBrack_Loc = 0 then
+                        Last_Source_Name :=
+                           Ada.Strings.Unbounded.To_Unbounded_String (
+                              Buffer(From_Loc+6 .. BLast));
+                     else
+                        Last_Source_Name :=
+                           Ada.Strings.Unbounded.To_Unbounded_String (
+                              Buffer(From_Loc+6 .. LBrack_Loc-1));
+                        begin
+                           Last_Start_Line := Trace.Line_Number_Type'Value (
+                              Buffer(LBrack_Loc+1..RBrack_Loc-1));
+                        exception
+                           when Constraint_Error =>
+                              Error ("Start line number malformatted");
+                        end;
+                     end if;
+                  end if;
+                  if Debug_Tool then
+                     Ada.Text_IO.Put_Line ("On line" &
+                        Line_Number_Type'Image(Lineno) &
+                        " saw TStamp line for " &
+                        Last_Kind_Type'Image(Last_Kind) & " at " &
+                        (+Last_Timestamp));
+                     Ada.Text_IO.Put ("  for unit " &
+                        (+Last_Unit_Name));
+                     if Last_Kind = Start_Compile_Spec or else
+                        Last_Kind = Start_Compile_Body then
+                        Ada.Text_IO.Put ("  from source " &
+                           (+Last_Source_Name));
+                     end if;
+                     Ada.Text_IO.New_Line;
+                  -- else no debugging.
+                  end if;
+
+               else
+                  Error ("Unable to find TStamp end");
+                  goto TStamp_Done;
+               end if;
+               <<TStamp_Done>> null;
+            end;
+
+         -- Compiler events:
+         elsif BLast >= GNAT_Identification'Last and then
+            Buffer(1..GNAT_Identification'Last) = GNAT_Identification
+            then
+            -- Start of a compilation.
+            if Last_Kind = Start_Bind then
+               -- A compiler header in the GNATMake portion of the listing;
+               -- ignore it.
+               null;
+            elsif Last_Kind /= Start_Compile_Spec and then
+                  Last_Kind /= Start_Compile_Body then
+               Error ("Missing TStamp header before start compilation");
+            else
+               Put_Event_Trace (Event     => "CSTART",
+                                Timestamp => +Last_Timestamp,
+                                Item_Name => +Last_Source_Name,
+                                Msg       => "",
+                                Line_Num  => Last_Start_Line);
+            end if;
+
+         elsif (Last_Kind = Start_Compile_Spec or else
+                Last_Kind = Start_Compile_Body) and then
+               Ada.Strings.Fixed.Index (Buffer(1..BLast),
+                 " lines: ") /= 0 and then
+               Ada.Strings.Fixed.Index (Buffer(1..BLast),
+                 " errors") /= 0 then
+            -- The end of a compilation looks like:
+            -- "nnn lines: yyy errors"
+            Put_Event_Trace (Event     => "CEND",
+                             Timestamp => +Last_Timestamp,
+                             Item_Name => +Last_Source_Name,
+                             Msg       => Buffer(1..BLast));
+
+         elsif (Last_Kind = Start_Compile_Spec or else
+                Last_Kind = Start_Compile_Body) and then
+               Ada.Strings.Fixed.Index (Buffer(1..BLast),
+                 " lines: 1 error") /= 0 then
+            -- Special case for the exactly one error case for the end of a
+            -- compilation. (See above for the normal case.)
+            Put_Event_Trace (Event     => "CEND",
+                             Timestamp => +Last_Timestamp,
+                             Item_Name => +Last_Source_Name,
+                             Msg       => Buffer(1..BLast));
+
+         elsif BLast >= 25 and then
+               (Last_Kind = Start_Compile_Spec or else
+                Last_Kind = Start_Compile_Body) and then
+               Ada.Strings.Fixed.Index (Buffer(1..BLast),
+                 ": error: ") /= 0 then
+            -- A brief error message. Careful: We want to skip over the
+            -- verbose error messages (else we'll either end up with
+            -- doubled messages or GNATEvnt errors), so the first colon here
+            -- is critical.
+            -- Brief messages are of the form:
+            -- <Source file>:nnn:pp: error: <message>
+            -- We need to extract nnn and pp.
+            declare
+               Colon_1_Loc : Natural;
+               Colon_2_Loc : Natural;
+               Colon_3_Loc : Natural;
+               Line : Trace.Line_Number_Type;
+               Pos  : Trace.Line_Position_Type;
+            begin
+               -- Since there are two colons in the qualifying search string,
+               -- the first two have to work:
+               Colon_1_Loc := Ada.Strings.Fixed.Index (Buffer(1..BLast), ":");
+               Colon_2_Loc := Ada.Strings.Fixed.Index (
+                  Buffer(Colon_1_Loc+1..BLast), ":");
+               Colon_3_Loc := Ada.Strings.Fixed.Index (
+                  Buffer(Colon_2_Loc+1..BLast), ": error: ");
+               if Colon_3_Loc = 0 then
+                  Error ("Not enough colons in a brief error message");
+                  goto CErr_Done;
+               end if;
+               begin
+                  Line := Trace.Line_Number_Type'Value (
+                              Buffer(Colon_1_Loc+1..Colon_2_Loc-1));
+               exception
+                  when Constraint_Error =>
+                     Error ("Brief error message line number malformatted");
+                     goto CErr_Done;
+               end;
+               begin
+                  Pos := Trace.Line_Number_Type'Value (
+                              Buffer(Colon_2_Loc+1..Colon_3_Loc-1));
+               exception
+                  when Constraint_Error =>
+                     Error ("Brief error message position malformatted");
+                     goto CErr_Done;
+               end;
+                Put_Event_Trace (Event     => "CERR",
+                                 Timestamp => +Last_Timestamp,
+                                 Item_Name => +Last_Source_Name,
+                                 Msg       => Buffer(Colon_3_Loc+9..BLast),
+                                 Line_Num  => Line,
+                                 Line_Pos  => Pos);
+
+               <<CErr_Done>> null;
+            end;
+
+         -- Binder events:
+         elsif BLast >= GNATBIND_Identification'Last and then
+            Buffer(1..GNATBIND_Identification'Last) = GNATBIND_Identification
+            then
+            -- Start of binding.
+            if Last_Kind /= Start_Bind then
+               Error ("Missing TStamp header before start binding");
+            else
+               Wrote_Start_Bind := True;
+               Wrote_End_Bind := False;
+               Put_Event_Trace (Event     => "BSTART",
+                                Timestamp => +Last_Timestamp,
+                                Item_Name => +Last_Unit_Name,
+                                Msg       => "");
+            end if;
+
+         elsif BLast >= 8 and then Last_Kind = Start_Bind and then
+            Buffer(1..7) = "error: " then
+            Put_Event_Trace (Event     => "BERR",
+                             Timestamp => +Last_Timestamp,
+                             Item_Name => +Last_Unit_Name,
+                             Msg       => Buffer(8..BLast));
+
+         elsif BLast >= 40 and then
+               Last_Kind = Start_Bind and then
+               Ada.Strings.Fixed.Index (Buffer(1..BLast),
+                 "is not supported in this configuration") /= 0 then
+            -- Occurs during code generation for units, so it looks like a
+            -- bind error.
+            if not Wrote_Start_Bind then
+               Put_Event_Trace (Event     => "BSTART",
+                                Timestamp => +Last_Timestamp,
+                                Item_Name => +Last_Unit_Name,
+                                Msg       => "");
+               Wrote_Start_Bind := True;
+               Wrote_End_Bind := False;
+            end if;
+            Put_Event_Trace (Event     => "BERR",
+                             Timestamp => +Last_Timestamp,
+                             Item_Name => +Last_Source_Name,
+                             Msg       => Buffer(1..BLast));
+
+         elsif BLast >= 25 and then
+               Last_Kind = Start_Bind and then
+               Ada.Strings.Fixed.Index (Buffer(1..BLast),
+                 ": error: ") /= 0 then
+            -- A brief compiler error during binding. Careful: We want to skip
+            -- over the verbose error messages (else we'll either end up with
+            -- doubled messages or GNATEvnt errors), so the first colon here
+            -- is critical.
+            -- Brief messages are of the form:
+            -- <Source file>:nnn:pp: error: <message>
+            -- For the binding step, we only want the message.
+            -- Note: This mainly should happen for L-Tests.
+            declare
+               Colon_3_Loc : Natural :=
+                 Ada.Strings.Fixed.Index (Buffer(1..BLast),
+                   ": error: ");
+            begin
+               if Colon_3_Loc = 0 then
+                  Error ("Bizarre brief error message problem");
+               else
+                  if not Wrote_Start_Bind then
+                     Put_Event_Trace (Event     => "BSTART",
+                                      Timestamp => +Last_Timestamp,
+                                      Item_Name => +Last_Unit_Name,
+                                      Msg       => "");
+                     Wrote_Start_Bind := True;
+                     Wrote_End_Bind := False;
+                  end if;
+                  Put_Event_Trace (Event     => "BERR",
+                                   Timestamp => +Last_Timestamp,
+                                   Item_Name => +Last_Source_Name,
+                                   Msg       => Buffer(Colon_3_Loc+9..BLast));
+               end if;
+            end;
+
+         elsif BLast >= 29 and then
+               Last_Kind = Start_Bind and then
+               Buffer(1..29) = "cannot generate code for file" then
+            -- We ignore this message during the compilation phase, but
+            -- during the binding phase it probably means a missing body
+            -- so we treat it as a binder error.
+            -- Note: This mainly should happen for L-Tests.
+            if not Wrote_Start_Bind then
+               Put_Event_Trace (Event     => "BSTART",
+                                Timestamp => +Last_Timestamp,
+                                Item_Name => +Last_Unit_Name,
+                                Msg       => "");
+               Wrote_Start_Bind := True;
+               Wrote_End_Bind := False;
+            end if;
+            Put_Event_Trace (Event     => "BERR",
+                             Timestamp => +Last_Timestamp,
+                             Item_Name => +Last_Source_Name,
+                             Msg       => Buffer(1..BLast));
+
+         elsif BLast >= 9 and then Last_Kind = Start_Bind and then
+            Buffer(1..9) = "No errors" then
+            Put_Event_Trace (Event     => "BEND",
+                             Timestamp => +Last_Timestamp,
+                             Item_Name => +Last_Unit_Name,
+                             Msg       => "No errors");
+            Wrote_End_Bind := True;
+
+         elsif BLast >= 7 and then Last_Kind = Start_Bind and then
+            Buffer(1..7) = "1 error" then
+            Put_Event_Trace (Event     => "BEND",
+                             Timestamp => +Last_Timestamp,
+                             Item_Name => +Last_Unit_Name,
+                             Msg       => "1 error");
+            Wrote_End_Bind := True;
+
+         elsif BLast >= 8 and then Last_Kind = Start_Bind and then
+            Buffer(2..8) = " errors" then
+            -- 2..9 errors.
+            Put_Event_Trace (Event     => "BEND",
+                             Timestamp => +Last_Timestamp,
+                             Item_Name => +Last_Unit_Name,
+                             Msg       => Buffer(8..BLast));
+            Wrote_End_Bind := True;
+
+         elsif BLast >= 9 and then Last_Kind = Start_Bind and then
+            Buffer(3..9) = " errors" then
+            -- >=10 errors.
+            Put_Event_Trace (Event     => "BEND",
+                             Timestamp => +Last_Timestamp,
+                             Item_Name => +Last_Unit_Name,
+                             Msg       => Buffer(8..BLast));
+            Wrote_End_Bind := True;
+
+         elsif BLast >= 12 and then Last_Kind = Start_Bind and then
+            Buffer(1..10) = "gnatmake: " then
+            -- When binding uses GNATMake:
+            if Wrote_End_Bind then
+               null; -- Probably had a binding error that preceded this
+                     -- message.
+            elsif Ada.Strings.Fixed.Index (Buffer(11..BLast),
+               "*** bind failed.") /= 0 then
+                Put_Event_Trace (Event     => "BEND",
+                                 Timestamp => +Last_Timestamp,
+                                 Item_Name => +Last_Unit_Name,
+                                 Msg       => Buffer(11..BLast));
+                Wrote_End_Bind := True;
+            elsif Ada.Strings.Fixed.Index (Buffer(11..BLast),
+               "compilation error") /= 0 then
+                Put_Event_Trace (Event     => "BEND",
+                                 Timestamp => +Last_Timestamp,
+                                 Item_Name => +Last_Unit_Name,
+                                 Msg       => Buffer(11..BLast));
+                Wrote_End_Bind := True;
+            else
+               Error ("Unknown gnatmake result");
+                  -- Since we don't know what this is, treat it as a crash.
+            end if;
+
+
+         -- Execution events:
+         elsif BLast > 30 and then Buffer(1..5) = ",.,. " then
+            -- ACATS Test Execution Timestamp header.
+            declare
+               Vers_Loc : Natural;
+            begin
+               Vers_Loc := Ada.Strings.Fixed.Index (Buffer(6..BLast),
+                  Report_ACATS_Version_String);
+               if Vers_Loc = 0 then
+                  Error ("Unable to find Test Version");
+               else
+                  Last_Kind := Start_Execution;
+                  Last_Unit_Name :=
+                     Ada.Strings.Unbounded.To_Unbounded_String (
+                        Buffer(6 .. Vers_Loc-2));
+                  Last_Timestamp :=
+                     Ada.Strings.Unbounded.To_Unbounded_String ("20" &
+                        Buffer(Vers_Loc + Report_ACATS_Version_String'Length +1
+                           .. BLast));
+                     -- If someone is still using this program in 2100, they'll
+                     -- be pissed at me. But it's the easiest way to get
+                     -- the timestamp into a consistent format - RLB -
+                     -- Jan 26, 2017.
+               end if;
+               if Debug_Tool then
+                  Ada.Text_IO.Put_Line ("On line" &
+                     Line_Number_Type'Image(Lineno) &
+                     " saw ACATS Test Execution line at " &
+                        (+Last_Timestamp));
+                     Ada.Text_IO.Put_Line ("  for unit " &
+                        (+Last_Unit_Name));
+                  -- else no debugging.
+                  end if;
+            end;
+         elsif BLast > 16 and then Buffer(1..5) = "---- " then
+            -- ACATS Test Execution Start line
+            if Last_Kind /= Start_Execution then
+               Error ("Missing ACATS Version header before Start Execution " &
+                      "Header");
+            else
+               declare
+                  Msg_Loc : Natural;
+               begin
+                  -- Find the second space in the string.
+                  Msg_Loc := Ada.Strings.Fixed.Index (Buffer(6..BLast), " ");
+                  if Msg_Loc = 0 then Msg_Loc := BLast; end if;
+                  Put_Event_Trace (Event     => "EXSTART",
+                                   Timestamp => +Last_Timestamp,
+                                   Item_Name => +Last_Unit_Name,
+                                   Msg       => Buffer(Msg_Loc+1..BLast));
+               end;
+            end if;
+         elsif BLast > 40 and then Buffer(1..5) = "==== " then
+            -- ACATS Test Execution Finish line
+            if Last_Kind /= Start_Execution then
+               Error ("Missing ACATS Version header before Execution " &
+                      "Message");
+            else
+               Put_Event_Trace (Event     => "EXEND",
+                                Timestamp => +Last_Timestamp,
+                                Item_Name => +Last_Unit_Name,
+                                Msg       => "Passed");
+               Last_Kind := Execution_Complete;
+            end if;
+         elsif BLast > 40 and then Buffer(1..5) = "**** " then
+            -- ACATS Test Execution Finish line
+            if Last_Kind /= Start_Execution then
+               Error ("Missing ACATS Version header before Execution " &
+                      "Message");
+            else
+               Put_Event_Trace (Event     => "EXEND",
+                                Timestamp => +Last_Timestamp,
+                                Item_Name => +Last_Unit_Name,
+                                Msg       => "Failed");
+               Last_Kind := Execution_Complete;
+            end if;
+         elsif BLast > 40 and then Buffer(1..5) = "++++ " then
+            -- ACATS Test Execution Finish line
+            if Last_Kind /= Start_Execution then
+               Error ("Missing ACATS Version header before Execution " &
+                      "Message");
+            else
+               Put_Event_Trace (Event     => "EXEND",
+                                Timestamp => +Last_Timestamp,
+                                Item_Name => +Last_Unit_Name,
+                                Msg       => "Not-Applicable");
+               Last_Kind := Execution_Complete;
+            end if;
+         elsif BLast > 40 and then Buffer(1..5) = "!!!! " then
+            -- ACATS Test Execution Finish line
+            if Last_Kind /= Start_Execution then
+               Error ("Missing ACATS Version header before Execution " &
+                      "Message");
+            else
+               Put_Event_Trace (Event     => "EXEND",
+                                Timestamp => +Last_Timestamp,
+                                Item_Name => +Last_Unit_Name,
+                                Msg       => "Tentatively Passed");
+               Last_Kind := Execution_Complete;
+            end if;
+         elsif BLast > 16 and then Last_Kind = Start_Execution and then
+            Buffer(1..5) = "   * " then
+            declare
+               Msg_Loc : Natural;
+            begin
+               -- Find the space following the test name in the string.
+               Msg_Loc := Ada.Strings.Fixed.Index (Buffer(6..BLast), " ");
+               if Msg_Loc = 0 then Msg_Loc := BLast; end if;
+               Put_Event_Trace (Event     => "EXFAIL",
+                                Timestamp => +Last_Timestamp,
+                                   Item_Name => +Last_Unit_Name,
+                                   Msg       => Buffer(Msg_Loc+1..BLast));
+            end;
+         elsif BLast > 16 and then Last_Kind = Start_Execution and then
+            Buffer(1..5) = "   + " then
+            declare
+               Msg_Loc : Natural;
+            begin
+               -- Find the space following the test name in the string.
+               Msg_Loc := Ada.Strings.Fixed.Index (Buffer(6..BLast), " ");
+               if Msg_Loc = 0 then Msg_Loc := BLast; end if;
+               Put_Event_Trace (Event     => "EXNA",
+                                Timestamp => +Last_Timestamp,
+                                   Item_Name => +Last_Unit_Name,
+                                   Msg       => Buffer(Msg_Loc+1..BLast));
+            end;
+         elsif BLast > 16 and then Last_Kind = Start_Execution and then
+            Buffer(1..5) = "   ! " then
+            declare
+               Msg_Loc : Natural;
+            begin
+               -- Find the space following the test name in the string.
+               Msg_Loc := Ada.Strings.Fixed.Index (Buffer(6..BLast), " ");
+               if Msg_Loc = 0 then Msg_Loc := BLast; end if;
+               Put_Event_Trace (Event     => "EXSACT",
+                                Timestamp => +Last_Timestamp,
+                                   Item_Name => +Last_Unit_Name,
+                                   Msg       => Buffer(Msg_Loc+1..BLast));
+            end;
+
+         elsif Last_Kind = Execution_Complete then
+            -- Any message that happens between "Execution_Complete" and
+            -- "Finish" is treated as a failure event:
+            -- "Aberrant termination: <message>", in the hopes of detecting
+            -- most kinds of aberrant termination.
+            Put_Event_Trace (Event     => "EXFAIL",
+                             Timestamp => +Last_Timestamp,
+                             Item_Name => +Last_Unit_Name,
+                             Msg       => "Aberrant termination: " &
+                                          Buffer(1..BLast));
+
+         -- else not a known event, so nothing to do.
+         end if;
+
+      end loop;
+   exception
+      when Ada.Text_IO.End_Error =>
+         null; -- Reached end of file as expected.
+   end;
+
+   -- And we're done.
+
+   Ada.Text_IO.Close (Listing_File);
+   Ada.Text_IO.Close (Event_File);
+
+exception
+   when Kill_Tool => null; -- A fatal error happened.
+end GNATEvnt;

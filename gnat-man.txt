@@ -1,0 +1,316 @@
+-- Tests requiring manual grading for ACATS 4.1 (with modification list 4.1H)
+-- and GNAT Pro 18.1 when GNAT is run using the GNATScrp and GNATEvnt tools on
+-- Windows.
+
+-- The following tests have foreign language source files (these require
+-- manual construction of test run scripts, which we are not doing):
+CD30005
+CXB3004
+CXB3006
+CXB3013
+CXB3017
+CXB3018
+CXB3023
+CXB3024
+CXB4009
+CXB5004
+CXB5005
+
+-- The following tests contain multiple partitions and thus need special
+-- binding and execution instructions:
+CXE1001
+CXE2001
+CXE2002
+CXE4001
+CXE4002
+CXE4003
+CXE4004
+CXE4005
+CXE4006
+CXE5002
+CXE5003
+LXE3001
+LXE3002
+
+-- The following tests need a custom (but legal) compilation script:
+B91001D -- A task unit (not allowed) GNATChops as a specification,
+        -- but the test summary tool gives these nonexistent units a body
+        -- kind. Thus the wrong chopped source file is compiled.
+B91001E -- Same as B91001D.
+BA1001A -- Some of these contain illegal unit names; GNATScrp tries to use these names to compile,
+        -- but GNATChop used something else.
+BA1020A -- When BA1020A1 is GNATChopped, an old body file needs to be deleted.
+BA1020B -- When BA1020B1 is GNATChopped, an old spec file needs to be deleted.
+BA1020C -- When BA1020C1 is GNATChopped, an old spec file needs to be deleted.
+C250002 -- The grading summary tool does not currently work with UTF-8 file names, so the script malfunctions.
+BA14002 -- When BA140026 is GNATChopped, an old spec file needs to be deleted.
+C3A1003 -- The first two source files needs to be GNATChopped before any compilations (see "special requirements").
+C3A1004 -- The first two source files needs to be GNATChopped before any compilations (see "special requirements").
+CA1020E -- When CA1020E2 is GNATChopped, an old body file needs to be deleted.
+CA11023 -- The second source file needs to be GNATChopped first (see "special requirements").
+CA12001 -- The second source file needs to be GNATChopped first (see "special requirements").
+CA14028 -- When CA140283 is GNATChopped, four old spec files need to be deleted.
+CC51010 -- The third source file needs to be GNATChopped first (see "special requirements").
+LC30003 -- Both of the first two source files have to be GNATChopped before any compilations are attempted.
+
+-- The following tests intentionally have "aberrant termination", and thus are reported
+-- as failed, but actually are supposed to require special handling:
+EB4011A
+EB4012A
+EB4014A
+
+
+-- The following tests should be graded N/A, but the error message isn't in the standard format
+-- with no location and only occurs as a bind error:
+CXAG002
+CXD2007
+CXDB001
+CXDB002
+CXDB003
+CXDB004
+
+-- The following tests require splitting:
+B25002B -- Illegal uses of formatting control characters; far more errors than are needed.
+B26005A -- Illegal uses of formatting control characters; far more errors than are needed (and the line counts get messed up).
+B33102A -- Extra errors from "missing bodies" for F & G (@47, @48) - the bodies exist. Split needed to prove that this is
+        -- an error cascade issue.
+B33102B -- Extra errors from "missing bodies" for F & G (@47, @48) - the bodies exist. Split needed to prove that this is
+        -- an error cascade issue.
+B33102C -- Extra errors from "missing bodies" for F & G (@50, @51) - the bodies exist. Split needed to prove that this is
+        -- an error cascade issue. Also extra errors from uncompleted incomplete types (a test issue).
+B33102D -- Extra errors from "missing bodies" for F & G (@49, @50) - the bodies exist. Split needed to prove that this is
+        -- an error cascade issue.
+B33102E -- Extra errors from "missing bodies" for F & G (@47, @48) - the bodies exist. Split needed to prove that this is
+        -- an error cascade issue.
+B660001 -- Errors @125 & @129 reported on the previous line, also extra error @133 because illegal "/=" conflicts with
+        -- legal "=". The latter would require a test split to process formally (to prove that it goes away without @110).
+B83004B -- Extra errors for "missing bodies" for T & Fun (@f1-42) - the bodies exist. Split needed to prove that this is
+        -- an error cascade issue. Similar issues in files 2 and 3.
+B83004C -- Extra errors for "missing bodies" for T & Fun (@f0-67) - the bodies exist. Split needed to prove that this is
+        -- an error cascade issue. Similar issues in files 1 and 2.
+B83004D -- Extra errors for "missing bodies" for T & Fun (@f1-43) - the bodies exist. Split needed to prove that this is
+        -- an error cascade issue. Similar issues in files 2 and 3.
+B83F02A -- Extra error for "missing bodies" for Proc3 (@54) - the body exists. Split needed to prove that this is
+        -- an error cascade issue.
+
+-- The following test fails to bind as it requires a special version of the runtime:
+CXH1001 -- Runtime needs to be recompiled with Normalize_Scalars.
+
+-- The following tests need manual grading because the error is reported after
+-- the ERROR: tag:
+B26001A -- Missing close quotes; the error tag is considered part of the string.
+B26002A -- Missing close quotes; the error tag is considered part of the string.
+
+
+-- The following tests need manual grading because of errors reported
+-- on the wrong line:
+B32201A -- Errors @90 & @104 reported on the previous line.
+B324001 -- Errors @222 & 229 reported earlier.
+B33001A -- All errors reported much earlier.
+B35901C -- Error @45 reported on the previous line.
+B36102A -- Errors @38 & @40 reported on the previous line.
+B370002 -- Many errors reported on the previous line.
+B38103A -- Three errors reported on the wrong line.
+B38103B -- Three errors reported on the wrong line. 
+B38103C -- Three errors reported on the wrong line. 
+B38103D -- Three errors reported on the wrong line. [Also duplicate errors, see regeneration below.]
+B38103E -- Three errors reported on the wrong line.
+B391001 -- Error @80 reported on previous line.
+B393005 -- Error @132 reported @130.
+B393008 -- Error @107 reported @105.
+B393009 -- Error @104 reported @103.
+B394001 -- Errors @60, @103, & @105 reported @59, @102, & @104.
+B394A01 -- Many errors reported on previous line.
+B394A02 -- Many errors reported on previous line.
+B394A03 -- Many errors reported on previous line.
+B394A04 -- Many errors reported on previous line.
+B394A05 -- Many errors reported on previous line.
+B3A1005 -- 4 errors reported on the previous line.
+B41327B -- Error @66 reported @65.
+B415001 -- Last four errors reported on previous line.
+B431002 -- Extra error @138 part of error @139.
+B431004 -- Error @154 reported @153; extra error @116 part of error @117.
+B431005 -- Error @127 reported @126.
+B43201A -- Error @93 reported @92; extra error @58 part of error @59.
+B43201C -- 9 errors reported on the previous line.
+B43202C -- Errors @59 & 65 reported @58 & @64.
+B433002 -- 9 errors reported on the previous line.
+B433003 -- 8 errors reported on the previous line.
+B457001 -- Many errors reported at top rather than bottom of a case expression; some extra but related errors as well.
+B457004 -- Many errors reported at top rather than bottom of a case expression; some extra but related errors as well.
+B457005 -- All errors reported at top rather than bottom of a case expression.
+B457007 -- Many errors reported at top rather than bottom of a case expression; some extra but related errors as well.
+B460002 -- All errors reported at start rather than end of instantiation.
+B480002 -- 4 errors reported on an earlier line.
+B48002A -- Errors @125, @202, @280 reported @124, @201, @279.
+B48002G -- Errors @58 & @65 reported @57 & @64.
+B48003B -- Error @77 reported @76.
+B48003E -- Error @57 reported @56.
+B490003	-- All errors reported at locations other than the error tag.
+B551001 -- Error @119 reported on the next line (and a number of extra errors).
+B551002 -- Error @77 reported on the previous line.
+B57001B -- Error @146 reported on the previous line.
+B63009A -- Error @187 reported on the previous line.
+B63009B -- Error @191 reported on the previous line.
+B63009C -- Error @108 reported on the previous line.
+B63103A -- Errors @49 & @63 reported on the previous line.
+B650003 -- Errors @127 & @147 reported on the previous line.
+B650005 -- Error @177 reported on the previous line.
+B660002 -- Errors @113, @129, @195, and @198 reported on the previous line.
+B66001A -- Error @72 reported on the previous line.
+B66001B -- Errors @49, @116, @149, and @176 reported on the previous line.
+B670001 -- Error @64:3 reported on the previous line (and the correct line).
+B67001C -- Error @297 reported on the previous line.
+B730008 -- Errors @143, @156, @171, @184, @227, and @260 reported on the previous line.
+B730009 -- Errors @167 and @171 reported on the previous line.
+B740002 -- Errors @120, @126, @129, and @148 reported on the previous line.
+B74101A -- Errors @123, @125, @127, @133, @135, and @137 reported on the previous line.
+B74104A -- Error @188 and @193 reported on the previous line. (Extra errors @188, too.)
+B750A01 -- Errors @144 and @151 reported on the previous line.
+B750A02 -- Errors @140 and @146 reported on the previous line.
+B750A04 -- Many errors reported on the previous line.
+B750A05 -- Errors @407 and @428 reported on the previous line.
+B750A06 -- Errors @344 and @360 reported on the previous line.
+B750A08 -- Most errors reported on earlier lines.
+B750A09 -- Most errors reported on earlier lines.
+B750A10 -- Most errors reported on earlier lines.
+B750A11 -- Most errors reported on earlier lines.
+B750A12 -- Most errors reported on earlier lines.
+B750A13 -- Most errors reported on earlier lines.
+B830001 -- Error @128 reported @114.
+B83001A -- Errors @74, @98, @120 reported @75, @97, @119. Also "OPTIONAL ERROR:" tag incorrect.
+B83003A -- Errors @88, @112, @115 reported @89, @113, @116. Also "OPTIONAL ERROR:" tag incorrect.
+B83003B -- Errors @f3-54, @f4-54, @f4-57 reported @f3-55, @f4-55, @f4-58. Also "OPTIONAL ERROR:" tag incorrect.
+B83004A -- Errors @161, @190, @219 reported @162, @191, @220. Also "OPTIONAL ERROR:" tag incorrect.
+B83026B -- Opt Error @95 reported on both 94 & 95. Also "OPTIONAL ERROR:" tag incorrect.
+B831001 -- Error @297 reported @296.
+B83F02C -- Various optional errors reported in unexpected places.
+B851003 -- Many errors reported on the previous line.
+B851004 -- Errors @103 & @202 reported @102 & @201.
+B950002 -- Errors @69, @72, and @78 reported on the previous line.
+B95020A -- Errors @173 and @176 reported on the previous line. (Extra errors @172, too.)
+B95020B -- Errors @f0-62 and @f0-66 reported on the previous line. (Extra errors @62, too.)
+B95094A -- Error @48 reported on the previous line.
+BA11009 -- Error @183 & @186 reported on the previous line (and the correct line).
+BA11012 -- Various errors reported several lines earlier.
+BA11014 -- Error @f1-134 reported on both 133 & 134.
+BA21A01 -- All errors reported at start rather than end of instantiation.
+BA21A03 -- Error @122 reported @121.
+BA3006A -- Obsolete files reported with errors on other source files (but all errors reported somehow).
+BC1201H -- Error @57 reported @66.
+BC2001E -- Errors @36 & @52 reported @38 & @54.
+BC30001 -- All errors reported at start rather than end of instantiation.
+BC3013A -- Error @53 reported @52.
+BC3018A -- Errors on both lines of multiline instantiations.
+BC3123C -- Error @108 reported @108.
+BC3604A -- Last 6 errors reported at start rather than end of instantiation.
+BC51019 -- All errors reported at start rather than end of type declarations.
+BC51020 -- All errors reported at start rather than end of type declarations.
+BC51B02 -- Error @78 reported @77.
+BC51C01 -- All errors reported at start rather than end of instantiation.
+BC51C02 -- All errors reported at start rather than end of instantiation.
+BC60001 -- Error @65 reported @64.
+BC60002 -- All errors reported at start rather than end of formal parameter.
+BD11001 -- Error @90 reported @86; @107 reported @103; @124 reported @123.
+BDE0007 -- Error @200 reported @199.
+BDE0011 -- Possible error @169 reported @168.
+BXAI005 -- All errors reported several lines earlier than the error markers.
+BXAI006 -- All errors reported several lines earlier than the error markers.
+BXAI007 -- All errors reported several lines earlier than the error markers.
+BXAI008 -- All errors reported several lines earlier than the error markers.
+BXAIA03 -- All errors reported several lines earlier than the error markers.
+BXAIA04 -- All errors reported several lines earlier than the error markers.
+BXB3004 -- Errors @72 & @75 reported on the previous line; @83 & @88 several lines earlier.
+BXC3001 -- Many errors reported on the previous line.
+BXC3002 -- Errors @94 & @112 reported @93 & @111.
+BXC6003 -- No errors reported, but test could be intended to be N/A. (Would fail otherwise.)
+BXE2009 -- Error @198 reported @201.
+BXE2010 -- Error @119 reported @118.
+LXD7009 -- Error @f1-76 reported on the previous line.
+
+-- The following tests have restriction errors in "old" units; if the implementation
+-- recompiles the unit after seeing the configuration pragmas, (expected) but unmarked
+-- compilation errors will occur. Probably these should be marked as optional errors.
+-- Note: It's unclear that changing these tests would allow the grading tool to
+-- handle these, as they're appearing in the "wrong" compilation unit.
+LXH4002 -- Optional errors in first unit. -- Works as expected in GNAT.
+LXH4004 -- Optional errors in first unit.
+LXH4005 -- Optional errors in first unit. -- Works as expected in GNAT.
+LXH4007 -- Optional errors in first unit. -- Works as expected in GNAT.
+LXH4008 -- Optional errors in second unit.
+LXH4010 -- Optional errors in first unit.
+LXH4011 -- Optional errors in first unit.
+LXH4012 -- Optional errors in first unit.
+
+
+-- The following tests require manual grading because they have (duplicate)
+-- extra errors in places that the tests don't allow them:
+B371001 -- Compiling the main (in file 4) regenerates all of the errors from file 2.
+B3A1001 -- Bizarre error handling (some messages on previous line, but also extra errors on previous units).
+B3A1002 -- Bizarre error handling (some messages on previous line, but also extra errors on previous units).
+B3A1003 -- Extra errors @93 & @119 related to test.
+B3A1004 -- Errors in @f2 reported in a different unit!
+B49007A -- Extra error @81 related to test.
+B720001 -- Error @48 complaining about presense of body. (Error is reported when compiling body as well.)
+B731001 -- Compiling the main (in file 6) regenerates all of the errors from files 1 and 4.
+B74304A -- Errors @54 and @56 report item that was used prematurely.
+B74304B -- Error @73 report item that was used prematurely.
+B74304C -- Error @69 report item that was used prematurely.
+B830002 -- Compiling the main (in file 5) regenerates all of the errors from files 1 thru 4.
+BA14001 -- Extra error @f0-159 (rather bogus) reported during compilation of @fa. OK because any failure should grade as passed here (only one error in @fa).
+BA14003 -- Error reported @f0-93 when compiling @f2. OK because any failure should grade as passed here (only one error in @f2).
+BA15002 -- Compiling the main (in file 9) regenerates all of the errors from file 2 thru 8.
+BA15003 -- Compiling the main (in file B) regenerates all of the errors from file 2 thru A.
+BA2011A -- Extra errors @f6-41 & @f6-47 related to test errors.
+BA3006B -- Compiling the main (in file 4) regenerates error from file 1 (which really is one of the errors from file 3).
+BC3002E -- Extra errors @44 & @48 related to the test errors. (Allow as optional errors??)
+BC3604B -- Extra errors @90 & @93 related to the test errors.
+BC51021 -- Compiling the main (in file 3) regenerates all of the errors from file 1 & 2; compiling the body in file 1 repeats the specification errors in file 1.
+BC51022 -- Compiling the main (in file 3) regenerates all of the errors from file 1 & 2. Also, @f1-79 & @f1-98 reported on previous line.
+BDD2004 -- Extra error @190 related to the test errors.
+BDD2005 -- Extra errors @124 and @191 related to the test errors.
+BDE0003 -- Extra errors @149 and @150 related to the test errors.
+LXH4003 -- Compiling the main (in file 2) regenerates all of the errors from file 1.
+LXH4006 -- Compiling the main (in file 3) regenerates all of the errors from file 2.
+LXH4009 -- Compiling the main (in file 3) regenerates all of the errors from file 2.
+LXH4014 -- Compiling the main (in file 2) regenerates one of the errors from file 1.
+
+-- The following Annex tests appear to fail on Windows (probably doesn't have the appropriate
+-- real-time behavior). Most likely, the implementation would not attempt to do a conformity
+-- assessment against Annex D on this target, so these do not represent a real problem. Note
+-- that these tests can't be "manually graded", as they outright report failure.
+-- CXD2002
+-- CXD2003
+-- CXD2004
+-- CXD2008
+-- CXD6001
+-- CXD6002
+
+-- The following tests appear to fail with GNATPro 18.1; many of these are new tests
+-- that an existing compiler can't be expected to pass. Others may pass with other
+-- compiler switches or compilation sequence than that generated by GNATScrp.
+--B35A001 -- Error @126 missed.
+--B392011 -- Error @67 missed.
+--B393007 -- Bogus Extra errors @99 (claims must override routine not inherited ["-"])
+--B393011 -- Bogus Extra errors @f2-70 (claims must override routine not inherited ["-"])
+--B611018 -- Extra error.
+--B651001 -- One error missed.
+--B651003 -- One error missed.
+--B680001 -- Extra error.
+--B83E01D -- Errors @202 & @208 missed.
+--BA11005 -- Two errors missed.
+--BD30001 -- Error @142 missed.
+--BD30002 -- Error @145 missed.
+--BD30003 -- Error @150 missed.
+--BD2A67A -- Error @35 missed.
+--BD2A77A -- Error @40 missed.
+--BDD2002 -- All 7 errors missed.
+--BDE0009 -- All 3 errors missed.
+--BXE2012 -- Error @187 missed.
+--BXH4003 -- Three errors missed.
+--C394001 -- Intermittently reports runtime failure.
+--C611A04 -- Runtime failure.
+--C760A02 -- Near infinite finalizations. (2264482 finalizations, supposed to be 5)
+--C760A03 -- Near infinite finalizations. (2264482 finalizations, supposed to be 5)
+--CXAC009 -- Compile error when files compiled individually, works when GNATMake is used. ?!?
+--CXAG003 -- Compile errors - Ada.Directories.Name_Case_Equivalence missing.
