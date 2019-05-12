@@ -74,12 +74,12 @@ procedure GNATEvnt is
    Debug_Tool : constant Boolean := True;
 --Change if necessary---------------^^^^^
 
-   GNAT_Identification : constant String := "GNAT Pro 18.";
+   GNAT_Identification : constant String := "GNAT ";
 --Change if necessary------------------------^^^^^^^^^^^^^^
-      -- This identifies the start of a compliation; it has to match the
+      -- This identifies the start of a compilation; it has to match the
       -- value written to the listings.
 
-   GNATBIND_Identification : constant String := "GNATBIND Pro 18.";
+   GNATBIND_Identification : constant String := "GNATBIND ";
 --Change if necessary----------------------------^^^^^^^^^^^^^^^^
       -- This identifies the start of binding; it has to match the
       -- value written to the listings.

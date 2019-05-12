@@ -25,6 +25,7 @@
 
 with Ada.Calendar.Arithmetic,
      Ada.Calendar.Formatting,
+     Ada.Calendar.Time_Zones,
      Ada.Command_Line,
      Ada.Text_IO;
 procedure TStamp is
@@ -54,7 +55,8 @@ begin
    Ada.Text_IO.Put ("%%%% ");
    Ada.Text_IO.Put (Ada.Calendar.Formatting.Image (
       Date => Ada.Calendar.Clock,
-      Include_Time_Fraction => True));
+      Include_Time_Fraction => True,
+      Time_Zone => Ada.Calendar.Time_Zones.UTC_Time_Offset));
    if Ada.Command_Line.Argument(2) = "BIND" then
        Ada.Text_IO.Put ("| BIND ");
        Ada.Text_IO.Put_Line (Ada.Command_Line.Argument(1)); -- Unit-Name

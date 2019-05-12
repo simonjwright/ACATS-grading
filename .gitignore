@@ -1,0 +1,12 @@
+.build
+
+*.csv
+*.txt
+*.sh
+*.ad?
+
+gnatevnt
+gnatscrp
+grade
+summary
+tstamp

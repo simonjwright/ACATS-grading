@@ -1,0 +1,36 @@
+--  Build the tools used for running the ACATS gnat-specific grading
+--  scripts.
+--
+--  Assumes that the support code, stored as at
+--  https://github.com/simonjwright/ACATS, is in ../ACATS.
+
+project Tools is
+
+   for Main use ("gnatscrp.a", "gnatevnt.a", "tstamp.a",
+                 "summary.a", "grade.a");
+
+   for Exec_Dir use ".";
+   for Source_Dirs use (".", "../ACATS/support");
+   for Object_Dir use ".build";
+
+   package Naming is
+
+      for Body ("gnatscrp") use "gnatscrp.a";
+      for Body ("gnatevnt") use "gnatevnt.a";
+      for Body ("tstamp") use "tstamp.a";
+
+      for Body ("summary") use "summary.a";
+      for Body ("grade") use "grade.a";
+
+      for Spec ("trace") use "trace.a";
+
+      for Spec ("grading_data") use "grd_data.a" at 1;
+      for Body ("grading_data") use "grd_data.a" at 2;
+      for Spec ("special_handling") use "special.a" at 1;
+      for Body ("special_handling") use "special.a" at 2;
+      for Spec ("test_summary") use "tst_sum.a" at 1;
+      for Body ("test_summary") use "tst_sum.a" at 2;
+
+   end Naming;
+
+end Tools;

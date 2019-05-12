@@ -120,7 +120,7 @@ procedure GNATScrp is
 
 
    type Target_Kind_Type is (Windows, Linux);
-   Target_Kind : constant Target_Kind_Type := Windows;
+   Target_Kind : constant Target_Kind_Type := Linux;
 --Change if necessary-------------------------^^^^^^^
 
    Debug_Tool : constant Boolean := True;
@@ -540,15 +540,15 @@ procedure GNATScrp is
          -- Delete the file containing any configuration pragmas, too.
          Ada.Text_IO.Put_Line (Script_File, "del gnat.adc");
       elsif Target_Kind = Linux then
-         Ada.Text_IO.Put_Line (Script_File, "rm " &
+         Ada.Text_IO.Put_Line (Script_File, "rm -f " &
             Grading_Data.Summary_of_Tests(First).Source_Name(1..7) &  "*");
          if Includes_Binding then
-            Ada.Text_IO.Put_Line (Script_File, "rm b~" &
+            Ada.Text_IO.Put_Line (Script_File, "rm -f b~" &
                Grading_Data.Summary_of_Tests(First).Source_Name(1..7) &  "*");
          -- else no binding to clean up.
          end if;
          -- Delete the file containing any configuration pragmas, too.
-         Ada.Text_IO.Put_Line (Script_File, "rm gnat.adc");
+         Ada.Text_IO.Put_Line (Script_File, "rm -f gnat.adc");
       -- else Unknown target
       end if;
 
@@ -567,7 +567,7 @@ procedure GNATScrp is
                         Grading_Data.Summary_of_Tests(I).Unit_Name),
                       Ada.Strings.Both) & "*.*");
             elsif Target_Kind = Linux then
-               Ada.Text_IO.Put_Line (Script_File, "rm " &
+               Ada.Text_IO.Put_Line (Script_File, "rm -f " &
                   Ada.Strings.Fixed.Trim (GNAT_Unit_Name (
                         Grading_Data.Summary_of_Tests(I).Unit_Name),
                       Ada.Strings.Both) & "*");
@@ -807,8 +807,12 @@ begin
        -- Comment characters vary for different shells; for now, we'll leave
        -- the comments out.
        -- Start with an empty result listing file:
-       Ada.Text_IO.Put_Line (Script_File, "rm " &
-                                               Ada.Command_Line.Argument(3));
+       Ada.Text_IO.Put_Line (Script_File, "rm -f " &
+                              Ada.Command_Line.Argument(3));
+       -- We need to have the current directory on the path (I'm
+       -- assuming that the suite is run from the directory where the
+       -- grading tools, both standard and GNAT-specific, are built).
+       Ada.Text_IO.Put_Line (Script_File, "PATH=""."":$PATH");
    end if;
 
 
