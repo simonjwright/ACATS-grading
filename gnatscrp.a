@@ -46,7 +46,9 @@
 --                        exceptions end up in the listings. Added an
 --                        option for processing UTF-8 files.
 --      2 Feb 2017   RLB  Changed model of compilation.
-
+--     12 May 2019   SJW  Target set to Linux. Say 'rm -f' throughout.
+--                        Add current directory to PATH.
+--
 with Ada.Calendar.Arithmetic,
      Ada.Calendar.Formatting,
      Ada.Command_Line,

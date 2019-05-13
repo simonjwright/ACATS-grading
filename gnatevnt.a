@@ -58,6 +58,8 @@
 --                        be able to process long listings.
 --     15 Jun 2018   RLB  Corrected Put_Event_Trace to deal properly with
 --                        excessively long lines, proposed by Simon Wright.
+--     12 May 2019   SJW  Reduced GNAT identification strings to the minimum
+--                        necessary.
 --
 with Ada.Calendar.Arithmetic,
      Ada.Calendar.Formatting,
