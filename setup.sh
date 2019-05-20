@@ -5,7 +5,4 @@
 
 gprbuild -p -P tools
 
-gnatchop ../ACATS/support/checkfil.ada
-gnatchop ../ACATS/support/impdef*.a
-gnatchop ../ACATS/support/report.a
-gnatchop ../ACATS/support/tctouch.ada
+./setup-working-directory.sh
