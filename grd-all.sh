@@ -5,7 +5,7 @@ tools_dir="`dirname $0`"
 # There are more tests to run than to grade.
 to_grade="a \
 b2 b3 b4 b5 b6 b7 b8 b9 ba bb bc bd be bxa bxb bxc bxd bxe bxf bxh \
-c2 c3 c4 c5 c6 c7 c8 c9 ca cc cc cd ce cxa cxb cxc cxd cxe cxf cxg cxh \
+c2 c3 c4 c5 c6 c7 c8 c9 ca cc cd ce cxa cxb cxc cxd cxe cxf cxg cxh \
 d \
 e \
 l lxd lxe lxh"

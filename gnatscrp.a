@@ -170,7 +170,7 @@ procedure GNATScrp is
       -- are primarily used to ensure that all Legality Rules are enforced).
       -- See the discussion of "Model of test processing" above.
 
-   Extra_Compiler_Options : constant String := "-O0 -gnatws";
+   Extra_Compiler_Options : constant String := "-O0 -gnatws -Isupport";
 --Change if necessary---------------------------^^^^^^^^^^^
       -- The above sets the compiler options to use, excluding options that
       -- are required and the Ada version.
@@ -663,7 +663,7 @@ procedure GNATScrp is
                    Ada_Semantic_Compiler_Options & " " &
                    Processing_Compiler_Options & " " &
                    Extra_Compiler_Options &
-                   " -bargs -T0 -v" &
+                   " -bargs -T0 -v -largs -lsupport" &
                " >> " & Result_Name & " 2>&1");
                -- GNATMake option: -eS - send compile, bind, and link commands
                --    Stdout.
