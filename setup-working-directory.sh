@@ -22,9 +22,13 @@ ln -s $PWD ACATS4GNATDIR
 # succeed (in most cases: not CD30005).
 find $tools_dir/../ACATS/tests -name \*.c -exec cp {} support/ \;
 find $tools_dir/../ACATS/tests -name \*.ftn -exec cp {} support/ \;
-# build the library
+# Build the library
 cp $tools_dir/support_lib.gpr .
 gprbuild -k -P support_lib.gpr
+# cd300051.o is picked up directly from support/ (via impdef). On
+# Linux, this conflicts with an element in libsupport.a, presumably
+# because of some link ordering.
+ar d libsupport.a cd300051.o
 
 # Pick up Ada code from ACATS/support
 for ada in $tools_dir/../ACATS/support/*.a*; do
@@ -46,7 +50,7 @@ cp $tools_dir/../ACATS/support/macro.dfs support/MACRO.DFS
 (cd support; ./macrosub)
 # Chop the processed files
 for processed in support/*.adt; do
-    gnatchop $ada support/
+    gnatchop $processed support/
 done
 
 # Copy the standard manual processing list, unless it's already here
