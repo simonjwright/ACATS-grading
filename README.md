@@ -15,11 +15,23 @@ $ /the/tool/directory/set-up-working-directory.sh
 $ /the/tool/directory/grd-all.sh
 ```
 
-This takes about 20 minutes on a early-2015 Macbook Pro with 2.9 GHz Intel Core i5, but note that [production compilers hang in C452003](https://gcc.gnu.org/bugzilla/show_bug.cgi?id=88610); on macOS, you can Ctrl-C to break out of this test and continue, whereas on debian stretch you'll need to say `killall gnatmake`.
+This takes about 25 minutes on a early-2015 Macbook Pro with 2.9 GHz Intel Core i5, but note that [production compilers hang in C452003](https://gcc.gnu.org/bugzilla/show_bug.cgi?id=88610).
+
+You could just move that test out of `ACATS/tests/c4`.
+
+If you don't do that, then once you've started a run on macOS or
+Debian (tested on _stretch_) and got stuck you'll need to say `killall
+gnatmake` in another terminal tab/window. At any rate on macOS, this
+can leave _gnat1_ processes around, which will also need to be killed.
 
 To test just one chapter, say `c4`, replace the last line by
 ```shell
 $ /the/tool/directory/mkacats.sh c4
+```
+
+If you only want to check a small number of tests, copy the test code (which may consist of more than one file) into a parallel directory in the test suite - e.g., `ACATS/tests/new` - and say
+```shell
+$ /the/tool/directory/mkacats.sh new
 ```
 
 The instructions above do a one-time copy of `gnat-man.txt` (the manual grading file), so you can make any necessary changes before re-running the tests.
