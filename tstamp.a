@@ -22,9 +22,10 @@
 -- CHANGE HISTORY:
 --     24 Jan 2017   RLB  Created basic program.
 --     26 Jan 2017   RLB  Added Start_Line.
+--     27 Jun 2019   RLB  Modified for AI12-0336-1 and GNAT practice.
 
-with Ada.Calendar.Arithmetic,
-     Ada.Calendar.Formatting,
+with Ada.Calendar.Formatting,
+     Ada.Calendar.Time_Zones,
      Ada.Command_Line,
      Ada.Text_IO;
 procedure TStamp is
@@ -52,9 +53,21 @@ begin
    end if;
 
    Ada.Text_IO.Put ("%%%% ");
+   -- Ada 2012 as defined: (Janus/Ada 3.2.1 only)
+   --Ada.Text_IO.Put (Ada.Calendar.Formatting.Image (
+   --   Date => Ada.Calendar.Clock,
+   --   Include_Time_Fraction => True));
+   -- Ada 2012 as implemented by GNAT (and confirmed by AI12-0336-1; also
+   --   ObjectAda and ApexAda):
    Ada.Text_IO.Put (Ada.Calendar.Formatting.Image (
       Date => Ada.Calendar.Clock,
-      Include_Time_Fraction => True));
+      Include_Time_Fraction => True,
+      Time_Zone => Ada.Calendar.Time_Zones.UTC_Time_Offset));
+   -- Ada 202x (as defined by AI12-0336-1):
+   --Ada.Text_IO.Put (Ada.Calendar.Formatting.Local_Image (
+   --   Date => Ada.Calendar.Clock,
+   --   Include_Time_Fraction => True));
+
    if Ada.Command_Line.Argument(2) = "BIND" then
        Ada.Text_IO.Put ("| BIND ");
        Ada.Text_IO.Put_Line (Ada.Command_Line.Argument(1)); -- Unit-Name
