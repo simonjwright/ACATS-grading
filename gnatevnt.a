@@ -60,6 +60,7 @@
 --                        excessively long lines, proposed by Simon Wright.
 --     12 May 2019   SJW  Reduced GNAT identification strings to the minimum
 --                        necessary.
+--     28 Feb 2022   SJW  Fixed parsing of execution start messages.
 --
 with Ada.Calendar.Arithmetic,
      Ada.Calendar.Formatting,
@@ -639,6 +640,12 @@ begin
          -- Execution events:
          elsif BLast > 30 and then Buffer(1..5) = ",.,. " then
             -- ACATS Test Execution Timestamp header.
+            -- The format is e.g.
+            -- ,.,. A22006B ACATS 4.1Y 22-02-12 22:16:23
+            -- and the Report_ACATS_Version_String is e.g.
+            -- ACATS 4.1
+            -- The 'Y', which identifies the specific release of the ACATS,
+            -- might be more than one character (e.g. ACATS 4.1AA).
             declare
                Vers_Loc : Natural;
             begin
@@ -651,14 +658,29 @@ begin
                   Last_Unit_Name :=
                      Ada.Strings.Unbounded.To_Unbounded_String (
                         Buffer(6 .. Vers_Loc-2));
-                  Last_Timestamp :=
-                     Ada.Strings.Unbounded.To_Unbounded_String ("20" &
-                        Buffer(Vers_Loc + Report_ACATS_Version_String'Length +1
-                           .. BLast));
+                  declare
+                     Timestamp_Loc : Positive;
+                  begin
+                     Timestamp_Loc := Vers_Loc
+                       + Report_ACATS_Version_String'Length;
+                     --  Skip trailing version identifying characters,
+                     --  e.g. in ACATS 4.1Y
+                     while Buffer (Timestamp_Loc) /= ' ' loop
+                        Timestamp_Loc := Timestamp_Loc + 1;
+                     end loop;
+                     --  Skip blanks
+                     while Buffer (Timestamp_Loc) = ' ' loop
+                        Timestamp_Loc := Timestamp_Loc + 1;
+                     end loop;
+                     Last_Timestamp :=
+                       Ada.Strings.Unbounded.To_Unbounded_String (
+                         "20" &
+                         Buffer(Timestamp_Loc .. BLast));
                      -- If someone is still using this program in 2100, they'll
                      -- be pissed at me. But it's the easiest way to get
                      -- the timestamp into a consistent format - RLB -
                      -- Jan 26, 2017.
+                  end;
                end if;
                if Debug_Tool then
                   Ada.Text_IO.Put_Line ("On line" &
