@@ -12,10 +12,16 @@ The originator's test rationale and procedures are described in [gnatinst.txt](g
 
 ## Running ##
 
-It's best to run the suite in a different directory from its own. To do this,
+It's best to run the suite in a different directory from its own.
+
+Note, two of the tests (CXB5004 and CXB5005) require that the compiler in use supports Fortran. If it does, and you want to run these tests, set the environment variable `HAS_FORTRAN` to `yes`.
+
+Build the supporting code by
 ```shell
-$ cd /run/the/tests/here
 $ /the/tool/directory/setup-working-directory.sh
+```
+Then, run the tests by
+```shell
 $ /the/tool/directory/grd-all.sh
 ```
 

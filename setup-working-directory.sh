@@ -2,6 +2,8 @@
 # in the directory from which the tools are to be run (best if this
 # isn't the same as the grading tools' directory).
 
+set -eu
+
 # Locate the tools.
 tools_dir="`dirname $0`"
 
