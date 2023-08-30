@@ -612,7 +612,7 @@ begin
             Wrote_End_Bind := True;
 
          elsif BLast >= 12 and then Last_Kind = Start_Bind and then
-            Buffer(1..10) = "gnatmake: " then
+            Buffer(1..15) = "llvm-gnatmake: " then
             -- When binding uses GNATMake:
             if Wrote_End_Bind then
                null; -- Probably had a binding error that preceded this

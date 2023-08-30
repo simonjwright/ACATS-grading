@@ -14,9 +14,15 @@ project Tools is
    for Object_Dir use ".build";
    for Create_Missing_Dirs use "true";
 
+   for Target use "llvm";
+
    package Builder is
       for Global_Compilation_Switches ("ada") use ("-g");
    end Builder;
+
+   package Binder is
+      for Bindfile_Option_Substitution ("-static") use ("");
+   end Binder;
 
    package Naming is
 

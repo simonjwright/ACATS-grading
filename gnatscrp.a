@@ -446,7 +446,7 @@ procedure GNATScrp is
                    " .");
             -- else unknown target
             end if;
-            Ada.Text_IO.Put_Line (Script_File, "gnatchop -w -c -r " &
+            Ada.Text_IO.Put_Line (Script_File, "llvm-gnatchop -w -c -r " &
                Ada_Version_Option & " " & Source_Representation_Option (I) &
                Source_Name (I) &
                " >> " & Result_Name);
@@ -505,7 +505,7 @@ procedure GNATScrp is
                   " >> " & Result_Name);
             end if;
             if Is_Spec (Grading_Data.Summary_of_Tests(I).Unit_Kind) then
-               Ada.Text_IO.Put_Line (Script_File, "gcc " &
+               Ada.Text_IO.Put_Line (Script_File, "llvm-gcc " &
                   Ada.Strings.Fixed.Trim (GNAT_Unit_Name (Unit_Name (I)),
                      Ada.Strings.Both) & ".ads -c " &
                      Ada_Version_Option & " " &
@@ -517,7 +517,7 @@ procedure GNATScrp is
                      " >> " & Result_Name & " 2>&1");
                -- See below for reasons why we use this format.
             else
-               Ada.Text_IO.Put_Line (Script_File, "gcc " &
+               Ada.Text_IO.Put_Line (Script_File, "llvm-gcc " &
                   Ada.Strings.Fixed.Trim (GNAT_Unit_Name (Unit_Name (I)),
                      Ada.Strings.Both) & ".adb -c " &
                      Ada_Version_Option & " " &
@@ -654,7 +654,7 @@ procedure GNATScrp is
             Test_Summary.Compilation_Unit and then
             Grading_Data.Summary_of_Tests(I).Is_Main then
 
-            Ada.Text_IO.Put_Line (Script_File, "gnatmake "  &
+            Ada.Text_IO.Put_Line (Script_File, "llvm-gnatmake "  &
                Ada.Strings.Fixed.Trim (GNAT_Unit_Name (Unit_Name (I)),
                    Ada.Strings.Both) &
                    " -eS -cargs " &

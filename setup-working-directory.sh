@@ -34,7 +34,7 @@ ar d libsupport.a cd300051.o
 
 # Pick up Ada code from ACATS/support
 for ada in $tools_dir/../ACATS/support/*.a*; do
-    gnatchop $ada support/
+    llvm-gnatchop $ada support/
 done
 
 # Pick up code that needs to have macros substituted (only in the
@@ -47,12 +47,12 @@ ls $PWD/support/*.tst >support/TSTTESTS.DAT
 # Macros for substitution
 cp $tools_dir/../ACATS/support/macro.dfs support/MACRO.DFS
 # Build macrosub (and send_sigint_to_parent, while we're here)
-(cd support; gnatmake macrosub send_sigint_to_parent)
+(cd support; llvm-gnatmake macrosub send_sigint_to_parent)
 # Run macrosub
 (cd support; ./macrosub)
 # Chop the processed files
 for processed in support/*.adt; do
-    gnatchop $processed support/
+    llvm-gnatchop $processed support/
 done
 
 # Copy the standard manual processing list, unless it's already here
