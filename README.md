@@ -10,6 +10,12 @@ As written, this suite expects to be installed next to ACATS (that is, `../ACATS
 
 The originator's test rationale and procedures are described in [gnatinst.txt](gnatinst.txt).
 
+## Compiler ##
+
+Normally, the suite will run the tests using whichever GNAT suite is first in the PATH.
+
+The `llvm` branch expects to find the GNAT LLVM suite in the PATH (i.e. it looks for `llvm-gnatmake`, `llvm-gcc`).
+
 ## Running ##
 
 It's best to run the suite in a different directory from its own.
@@ -35,6 +41,7 @@ To test just one chapter, say `c4`, replace the last line by
 ```shell
 $ /the/tool/directory/mkacats.sh c4
 ```
+The results will be in `g-g{chapter}.txt` (in this case, `g-gc4.txt`).
 
 If you only want to check a small number of tests, copy the test code (which may consist of more than one file) into a parallel directory in the test suite - e.g., `ACATS/tests/new` - and say
 ```shell
