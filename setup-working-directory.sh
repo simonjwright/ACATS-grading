@@ -37,6 +37,13 @@ for ada in $tools_dir/../ACATS/support/*.a*; do
     gnatchop $ada support/
 done
 
+# To support parallelization, each test is run in subdirectory {test},
+# which is deleted after the test. Some tests rely on files preserved
+# from previous tests; the names of these files are derived from the
+# function Report.Legal_File_Name. This patch puts the file one level
+# up from the execution directory.
+sed -e '/ => return (/s%(%(\"../\" \& %' -i% support/report.adb
+
 # Pick up code that needs to have macros substituted (only in the
 for tst in $tools_dir/../ACATS/support/*.tst; do
     cp $tst support/
