@@ -3,7 +3,7 @@
 # Assumes the tests, stored as at https://github.com/simonjwright/ACATS,
 # are in ../ACATS.
 
-tools_dir="`dirname $0`"
+tools_dir="$(realpath $(dirname $0))"
 
 rm -f 41-$1-sum.csv
 rm -f 41-$1-sum.txt
@@ -18,7 +18,7 @@ $tools_dir/gnatscrp 41-$1-sum.csv \
                     41-$1.sh \
                     41-$1-results.txt \
                     $tools_dir/../ACATS/tests/$1/
-sh ./41-$1.sh
+sh ./41-$1.sh 2>&1 > 41-$1-results.txt
 rm 41-$1-event.csv
 $tools_dir/gnatevnt 41-$1-results.txt 41-$1-event.csv
 # -Could use -Verbose below, but it's huge.
