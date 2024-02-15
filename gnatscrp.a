@@ -858,9 +858,6 @@ begin
    else
        -- Comment characters vary for different shells; for now, we'll leave
        -- the comments out.
-       -- Start with an empty result listing file:
-       Ada.Text_IO.Put_Line (Script_File, "rm -f " &
-                              Ada.Command_Line.Argument(3));
        -- We need to have the tools' directory on the path.
        -- The double-quotes are because it's possible for the current
        -- path to contain spaces (e.g. "VMware Fusion.app" on macOS).
@@ -904,9 +901,11 @@ begin
                 & Unit_Name
                 & ".sh";
          begin
+            --  We run the unit script from the main script; we add
+            --  "|| true" in case the unit script fails.
             Ada.Text_IO.Put_Line
               (Script_File,
-               "sh " & Unit_Script_Name);
+               "sh " & Unit_Script_Name & " || true");
             Ada.Text_IO.Create (Unit_Script_File,
                                 Mode => Ada.Text_IO.Out_File,
                                 Name => Unit_Script_Name);
