@@ -1,9 +1,7 @@
 .build
 
-*.csv
-*.txt
-*.sh
-*.ad?
+# ignore subdirectories.
+*/*
 
 gnatevnt
 gnatscrp
