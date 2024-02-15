@@ -49,6 +49,8 @@
 --     18 May 2019   SJW  Target set to Linux. Say 'rm -f' throughout.
 --                        Add tool's directory to PATH. Use lower-case
 --                        filenames for Linux.
+--     15 Feb 2024   SJW  Generate scripts so that tests can be run in
+--                        parallel. Reports version 2.0.
 --
 with Ada.Calendar.Arithmetic,
      Ada.Calendar.Formatting,
@@ -185,10 +187,10 @@ procedure GNATScrp is
 
    Kill_Tool : exception;
 
-   Unit_Script_File : Ada.Text_IO.File_Type;
-   --  These scripts run individual source unit tests.
+   Test_Script_File : Ada.Text_IO.File_Type;
+   --  These scripts run individual tests.
    Script_File : Ada.Text_IO.File_Type;
-   --  This script runs all the unit scripts.
+   --  This script runs all the test scripts.
 
    Test_Counter : Natural := 0;
 
@@ -420,7 +422,7 @@ procedure GNATScrp is
 
       Test_Counter := Test_Counter + 1;
       if Target_Kind = Windows or Target_Kind = Linux then
-         Ada.Text_IO.Put_Line (Unit_Script_File, "echo Test number" &
+         Ada.Text_IO.Put_Line (Test_Script_File, "echo Test number" &
             Natural'Image(Test_Counter) & " - " & Test_Name);
       -- else Unknown target
       end if;
@@ -429,9 +431,9 @@ procedure GNATScrp is
       --  "gnatchop -c" generates a configuration pragma file, it does
       --  so in "gnat.adc" in the current working directory; not good
       --  if running multiple tests in parallel.
-      Ada.Text_IO.Put_Line (Unit_Script_File, "mkdir " & Test_Name);
-      Ada.Text_IO.Put_Line (Unit_Script_File, "cd " & Test_Name);
-      Ada.Text_IO.Put_Line (Unit_Script_File, "ln -s .. ACATS4GNATDIR");
+      Ada.Text_IO.Put_Line (Test_Script_File, "mkdir " & Test_Name);
+      Ada.Text_IO.Put_Line (Test_Script_File, "cd " & Test_Name);
+      Ada.Text_IO.Put_Line (Test_Script_File, "ln -s .. ACATS4GNATDIR");
 
       -- Copy each source file, GNATChop it, and then compile the units:
       -- Note: We assume that the summary records are sorted so that all of
@@ -448,16 +450,16 @@ procedure GNATScrp is
             -- This is the first record for this source file. Generate the
             -- needed code. First, copy the file:
             if Target_Kind = Windows then
-               Ada.Text_IO.Put_Line (Unit_Script_File, "copy " &
+               Ada.Text_IO.Put_Line (Test_Script_File, "copy " &
                    Source_Path & Grading_Data.Summary_of_Tests(I).Source_Name &
                    " .");
             elsif Target_Kind = Linux then
-               Ada.Text_IO.Put_Line (Unit_Script_File, "cp " &
+               Ada.Text_IO.Put_Line (Test_Script_File, "cp " &
                    Source_Path & Source_Name (I) &
                    " .");
             -- else unknown target
             end if;
-            Ada.Text_IO.Put_Line (Unit_Script_File, "gnatchop -w -c -r " &
+            Ada.Text_IO.Put_Line (Test_Script_File, "gnatchop -w -c -r " &
                Ada_Version_Option & " " & Source_Representation_Option (I) &
                Source_Name (I));
                 -- Some Gnatchop options are required:
@@ -490,7 +492,7 @@ procedure GNATScrp is
             -- These should be in a possible order.
 
             if Grading_Data.Summary_of_Tests(I).Start_Line not in 0 .. 1 then
-               Ada.Text_IO.Put_Line (Unit_Script_File, "tstamp " &
+               Ada.Text_IO.Put_Line (Test_Script_File, "tstamp " &
                   Ada.Strings.Fixed.Trim (
                      Grading_Data.Summary_of_Tests(I).Unit_Name,
                      Ada.Strings.Both) & " " &
@@ -502,7 +504,7 @@ procedure GNATScrp is
                   Trace.Line_Number_Type'Image (
                      Grading_Data.Summary_of_Tests(I).Start_Line));
             else -- Don't need start line, omit it.
-              Ada.Text_IO.Put_Line (Unit_Script_File, "tstamp " &
+              Ada.Text_IO.Put_Line (Test_Script_File, "tstamp " &
                   Ada.Strings.Fixed.Trim (
                      Grading_Data.Summary_of_Tests(I).Unit_Name,
                      Ada.Strings.Both) & " " &
@@ -513,7 +515,7 @@ procedure GNATScrp is
                      Ada.Strings.Both));
             end if;
             if Is_Spec (Grading_Data.Summary_of_Tests(I).Unit_Kind) then
-               Ada.Text_IO.Put_Line (Unit_Script_File, "gcc " &
+               Ada.Text_IO.Put_Line (Test_Script_File, "gcc " &
                   Ada.Strings.Fixed.Trim (GNAT_Unit_Name (Unit_Name (I)),
                      Ada.Strings.Both) & ".ads -c " &
                      Ada_Version_Option & " " &
@@ -524,7 +526,7 @@ procedure GNATScrp is
                      Extra_Compiler_Options);
                -- See below for reasons why we use this format.
             else
-               Ada.Text_IO.Put_Line (Unit_Script_File, "gcc " &
+               Ada.Text_IO.Put_Line (Test_Script_File, "gcc " &
                   Ada.Strings.Fixed.Trim (GNAT_Unit_Name (Unit_Name (I)),
                      Ada.Strings.Both) & ".adb -c " &
                      Ada_Version_Option & " " &
@@ -562,7 +564,7 @@ procedure GNATScrp is
    begin
       -- Mark the Finish of the part of the listing that we need for event
       -- trace purposes.
-      Ada.Text_IO.Put_Line (Unit_Script_File, "tstamp " &
+      Ada.Text_IO.Put_Line (Test_Script_File, "tstamp " &
             Grading_Data.Summary_of_Tests(First).Source_Name(1..7) &
             " FINISH");
 
@@ -570,68 +572,10 @@ procedure GNATScrp is
       -- which is a subdirectory of the one where the script is
       -- held. To clean them up, we just need to delete that
       -- subdirectory.
-      Ada.Text_IO.Put_Line (Unit_Script_File, "cd ..");
+      Ada.Text_IO.Put_Line (Test_Script_File, "cd ..");
       Ada.Text_IO.Put_Line
-        (Unit_Script_File,
+        (Test_Script_File,
          "rm -rf " & Grading_Data.Summary_of_Tests(First).Source_Name(1..7));
-
-      -- Done.
-      return;
-
-      -- We need to cleanup any source file copied, any source file unit
-      -- created by Gnatchop, .ali and .o files for any compilation unit
-      -- created by Gcc, and any executable file. Luckily, most of these
-      -- have a name prefixed by the test name.
-
-      -- First, we delete any file that matches the test name (with any
-      -- following characters), and any file that matches the elaboration
-      -- main program name):
-      if Target_Kind = Windows then
-         Ada.Text_IO.Put_Line (Unit_Script_File, "del " &
-            Grading_Data.Summary_of_Tests(First).Source_Name(1..7) &  "*.*");
-         if Includes_Binding then
-            Ada.Text_IO.Put_Line (Unit_Script_File, "del b~" &
-              Grading_Data.Summary_of_Tests(First).Source_Name(1..7) &  "*.*");
-         -- else no binding to clean up.
-         end if;
-         -- Delete the file containing any configuration pragmas, too.
-         Ada.Text_IO.Put_Line (Unit_Script_File, "del gnat.adc");
-      elsif Target_Kind = Linux then
-         Ada.Text_IO.Put_Line (Unit_Script_File, "rm -f " &
-            Source_Name (First)(1..7) &  "*");
-         if Includes_Binding then
-            Ada.Text_IO.Put_Line (Unit_Script_File, "rm -f b~" &
-               Source_Name (First)(1..7) &  "*");
-         -- else no binding to clean up.
-         end if;
-         -- Delete the file containing any configuration pragmas, too.
-         Ada.Text_IO.Put_Line (Unit_Script_File, "rm -f gnat.adc");
-      -- else Unknown target
-      end if;
-
-      -- Then check for any compilation units with some non-standard name,
-      -- but not units with 1 or 2 character names (those will delete far
-      -- too much).
-      for I in First .. Last loop
-         if Grading_Data.Summary_of_Tests(I).Kind =
-            Test_Summary.Compilation_Unit and then
-            Grading_Data.Summary_of_Tests(I).Source_Name(1..7) /=
-            Grading_Data.Summary_of_Tests(I).Unit_Name(1..7) and then
-            Grading_Data.Summary_of_Tests(I).Unit_Name(3) /= ' ' then
-            if Target_Kind = Windows then
-               Ada.Text_IO.Put_Line (Unit_Script_File, "del " &
-                  Ada.Strings.Fixed.Trim (GNAT_Unit_Name (
-                        Grading_Data.Summary_of_Tests(I).Unit_Name),
-                      Ada.Strings.Both) & "*.*");
-            elsif Target_Kind = Linux then
-               Ada.Text_IO.Put_Line (Unit_Script_File, "rm -f " &
-                  Ada.Strings.Fixed.Trim (GNAT_Unit_Name (Unit_Name (I)),
-                      Ada.Strings.Both) & "*");
-            -- else Unknown target
-            end if;
-         -- else
-         end if;
-      end loop;
    end Generate_Test_Cleanup_Script;
 
 
@@ -662,7 +606,7 @@ procedure GNATScrp is
 
       -- Mark the start of the binding step for event
       -- trace purposes.
-      Ada.Text_IO.Put_Line (Unit_Script_File, "tstamp " &
+      Ada.Text_IO.Put_Line (Test_Script_File, "tstamp " &
             Grading_Data.Summary_of_Tests(First).Source_Name(1..7) & " BIND");
 
       -- Find the name of the main unit:
@@ -671,7 +615,7 @@ procedure GNATScrp is
             Test_Summary.Compilation_Unit and then
             Grading_Data.Summary_of_Tests(I).Is_Main then
 
-            Ada.Text_IO.Put_Line (Unit_Script_File, "gnatmake "  &
+            Ada.Text_IO.Put_Line (Test_Script_File, "gnatmake "  &
                Ada.Strings.Fixed.Trim (GNAT_Unit_Name (Unit_Name (I)),
                    Ada.Strings.Both) &
                    " -eS -cargs " &
@@ -690,23 +634,23 @@ procedure GNATScrp is
                -- to capture everything in the listing, we grab StdErr.
 
 
---            Ada.Text_IO.Put_Line (Unit_Script_File, "gnatbind -T0 -v "  &
+--            Ada.Text_IO.Put_Line (Test_Script_File, "gnatbind -T0 -v "  &
 --               Ada.Strings.Fixed.Trim (GNAT_Unit_Name (
 --                      Grading_Data.Summary_of_Tests(I).Unit_Name),
 --                   Ada.Strings.Both));
 --               -- -v:  Verbose mode: sends error messages to Stdout.
 --               -- -T0: Annex D tasking compatibility.
 --
---            Ada.Text_IO.Put_Line (Unit_Script_File, "gnatlink " &
+--            Ada.Text_IO.Put_Line (Test_Script_File, "gnatlink " &
 --               Ada.Strings.Fixed.Trim (GNAT_Unit_Name (
 --                      Grading_Data.Summary_of_Tests(I).Unit_Name),
 --                   Ada.Strings.Both));
 
             -- Execute the test:
             if Target_Kind = Linux then
-               Ada.Text_IO.Put (Unit_Script_File, "./");
+               Ada.Text_IO.Put (Test_Script_File, "./");
             end if;
-            Ada.Text_IO.Put_Line (Unit_Script_File,
+            Ada.Text_IO.Put_Line (Test_Script_File,
                Ada.Strings.Fixed.Trim (GNAT_Unit_Name (Unit_Name (I)),
                    Ada.Strings.Both));
                -- Note: Unhandled exceptions go to StdErr for GNAT, so
@@ -887,7 +831,7 @@ begin
          -- When we get here, all of the items First_Item .. Working_Item - 1
          -- belong to the same test.
 
-         Create_Unit_Script_File :
+         Create_Test_Script_File :
          declare
             Source_Name : String
               renames Grading_Data.Summary_of_Tests(First_Item).Source_Name;
@@ -895,20 +839,20 @@ begin
               := Source_Name (Source_Name'First
                                 .. (Ada.Strings.Fixed.Index (Source_Name, ".")
                                       - 1));
-            Unit_Script_Name : constant String
+            Test_Script_Name : constant String
               := Ada.Command_Line.Argument(2)
                 & "-"
                 & Unit_Name
                 & ".sh";
          begin
-            --  We run the unit script from the main script; we add
-            --  "|| true" in case the unit script fails.
+            --  We run the test script from the main script; we add
+            --  "|| true" in case the test script fails.
             Ada.Text_IO.Put_Line
               (Script_File,
-               "sh " & Unit_Script_Name & " || true");
-            Ada.Text_IO.Create (Unit_Script_File,
+               "sh " & Test_Script_Name & " || true");
+            Ada.Text_IO.Create (Test_Script_File,
                                 Mode => Ada.Text_IO.Out_File,
-                                Name => Unit_Script_Name);
+                                Name => Test_Script_Name);
          exception
             when Exc1:Ada.Text_IO.Name_Error =>
                Ada.Text_IO.Put_Line
@@ -928,7 +872,7 @@ begin
                        & Ada.Exceptions.Exception_Message (Exc3));
                end if;
                raise Kill_Tool;
-         end Create_Unit_Script_File;
+         end Create_Test_Script_File;
 
          if Grading_Data.Summary_of_Tests(First_Item).Source_Name(1) = 'B' then
             Generate_B_Test_Script (First_Item, Working_Item - 1);
@@ -936,7 +880,7 @@ begin
             Generate_Other_Test_Script (First_Item, Working_Item - 1);
          end if;
 
-         Ada.Text_IO.Close (Unit_Script_File);
+         Ada.Text_IO.Close (Test_Script_File);
       end loop;
    end;
 
